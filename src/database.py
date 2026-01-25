@@ -148,3 +148,65 @@ class Database:
         if row and row["completed_at"]:
             return datetime.fromisoformat(row["completed_at"])
         return None
+
+    # Backoff schedule: 1h, 4h, 12h, 24h
+    BACKOFF_HOURS = [1, 4, 12, 24]
+
+    def add_to_retry_queue(
+        self,
+        entry_guid: str,
+        feed_id: int,
+        entry_url: str,
+        entry_title: str | None,
+        category: str,
+        error: str,
+    ) -> None:
+        """Add failed entry to retry queue with exponential backoff."""
+        # Check if already in retry queue
+        existing = self.execute(
+            "SELECT retry_count FROM retry_queue WHERE entry_guid = ?",
+            (entry_guid,),
+        ).fetchone()
+
+        if existing:
+            retry_count = existing["retry_count"] + 1
+            if retry_count >= len(self.BACKOFF_HOURS):
+                # Give up - remove from queue
+                self.execute("DELETE FROM retry_queue WHERE entry_guid = ?", (entry_guid,))
+                self.commit()
+                return
+            backoff = self.BACKOFF_HOURS[retry_count]
+            self.execute(
+                """UPDATE retry_queue
+                   SET retry_count = ?,
+                       last_attempt_at = CURRENT_TIMESTAMP,
+                       next_retry_at = datetime('now', '+' || ? || ' hours'),
+                       last_error = ?
+                   WHERE entry_guid = ?""",
+                (retry_count, backoff, error, entry_guid),
+            )
+        else:
+            backoff = self.BACKOFF_HOURS[0]
+            self.execute(
+                """INSERT INTO retry_queue
+                   (entry_guid, feed_id, entry_url, entry_title, category,
+                    last_attempt_at, next_retry_at, last_error)
+                   VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP,
+                           datetime('now', '+' || ? || ' hours'), ?)""",
+                (entry_guid, feed_id, entry_url, entry_title, category, backoff, error),
+            )
+        self.commit()
+
+    def get_retry_candidates(self) -> list[sqlite3.Row]:
+        """Get entries due for retry (next_retry_at <= now)."""
+        cursor = self.execute(
+            """SELECT * FROM retry_queue
+               WHERE next_retry_at <= CURRENT_TIMESTAMP
+               ORDER BY next_retry_at"""
+        )
+        return cursor.fetchall()
+
+    def remove_from_retry_queue(self, entry_guid: str) -> None:
+        """Remove entry from retry queue (after successful processing)."""
+        self.execute("DELETE FROM retry_queue WHERE entry_guid = ?", (entry_guid,))
+        self.commit()

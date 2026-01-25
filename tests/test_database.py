@@ -1,6 +1,7 @@
 """Tests for database module."""
 import tempfile
 from pathlib import Path
+from datetime import timedelta
 
 import pytest
 
@@ -101,3 +102,45 @@ def test_get_last_successful_run():
         # Should now have a timestamp
         last_run = db.get_last_successful_run()
         assert last_run is not None
+
+
+def test_add_to_retry_queue_and_get_candidates():
+    """Failed entries should be added to retry queue with backoff."""
+    from src.database import Database
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        db = Database(db_path)
+
+        # Add a feed first
+        db.execute(
+            "INSERT INTO feeds (url, title, category) VALUES (?, ?, ?)",
+            ("https://example.com/feed", "Test Feed", "articles"),
+        )
+        db.commit()
+
+        # Add to retry queue
+        db.add_to_retry_queue(
+            entry_guid="guid-456",
+            feed_id=1,
+            entry_url="https://example.com/article",
+            entry_title="Failed Article",
+            category="articles",
+            error="Connection timeout",
+        )
+
+        # Should not be immediately available (1 hour backoff)
+        candidates = db.get_retry_candidates()
+        assert len(candidates) == 0
+
+        # Manually set next_retry to now for testing
+        db.execute(
+            "UPDATE retry_queue SET next_retry_at = CURRENT_TIMESTAMP WHERE entry_guid = ?",
+            ("guid-456",),
+        )
+        db.commit()
+
+        # Now should be available
+        candidates = db.get_retry_candidates()
+        assert len(candidates) == 1
+        assert candidates[0]["entry_guid"] == "guid-456"
