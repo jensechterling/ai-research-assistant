@@ -1,5 +1,5 @@
 [project]
-name = "content-pipeline"
+name = "ai-research-assistant"
 version = "0.1.0"
 description = "Automated content aggregation pipeline for Obsidian"
 requires-python = ">=3.11"
@@ -19,7 +19,7 @@ dev = [
 ]
 
 [project.scripts]
-content-pipeline = "src.main:cli"
+ai-research-assistant = "src.main:cli"
 
 [build-system]
 requires = ["hatchling"]

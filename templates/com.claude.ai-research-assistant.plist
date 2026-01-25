@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.claude.content-pipeline</string>
+    <string>com.claude.ai-research-assistant</string>
 
     <key>ProgramArguments</key>
     <array>
@@ -19,10 +19,10 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/jens.echterling/.claude/logs/content-pipeline.log</string>
+    <string>/Users/jens.echterling/.claude/logs/ai-research-assistant.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/jens.echterling/.claude/logs/content-pipeline.log</string>
+    <string>/Users/jens.echterling/.claude/logs/ai-research-assistant.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>

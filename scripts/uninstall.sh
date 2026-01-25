@@ -1,13 +1,13 @@
 #!/bin/bash
 set -e
 
-echo "Uninstalling content-pipeline..."
+echo "Uninstalling ai-research-assistant..."
 
 # Unload launchd job
-launchctl unload ~/Library/LaunchAgents/com.claude.content-pipeline.plist 2>/dev/null || true
+launchctl unload ~/Library/LaunchAgents/com.claude.ai-research-assistant.plist 2>/dev/null || true
 
 # Remove plist
-rm -f ~/Library/LaunchAgents/com.claude.content-pipeline.plist
+rm -f ~/Library/LaunchAgents/com.claude.ai-research-assistant.plist
 
 # Optionally remove wake schedule
 read -p "Remove wake schedule? (y/N) " -n 1 -r

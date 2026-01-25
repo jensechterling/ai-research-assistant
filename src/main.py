@@ -15,7 +15,7 @@ def get_db() -> Database:
 
 @click.group()
 def cli():
-    """Content Pipeline - Import articles, videos, and podcasts to Obsidian."""
+    """AI Research Assistant - Import articles, videos, and podcasts to Obsidian."""
     pass
 
 

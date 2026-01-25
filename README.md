@@ -1,6 +1,6 @@
-# Content Pipeline
+# AI Research Assistant
 
-Automated content aggregation pipeline that fetches articles, YouTube videos, and podcasts from RSS feeds and creates structured Obsidian notes using Claude Code skills.
+Automated research pipeline that fetches articles, YouTube videos, and podcasts from RSS feeds and creates structured Obsidian notes using Claude Code skills.
 
 ## Features
 
@@ -17,21 +17,21 @@ Automated content aggregation pipeline that fetches articles, YouTube videos, an
 uv sync
 
 # Add some feeds
-uv run content-pipeline feeds add "https://stratechery.com/feed/" -c articles
+uv run ai-research-assistant feeds add "https://stratechery.com/feed/" -c articles
 
 # Run manually
-uv run content-pipeline run
+uv run ai-research-assistant run
 
 # Check status
-uv run content-pipeline status
+uv run ai-research-assistant status
 ```
 
 ## Installation
 
 ```bash
 # Clone repo
-git clone https://github.com/YOUR_USERNAME/content-pipeline.git
-cd content-pipeline
+git clone https://github.com/YOUR_USERNAME/ai-research-assistant.git
+cd ai-research-assistant
 
 # Install dependencies
 uv sync
@@ -44,12 +44,12 @@ uv sync
 
 | Command | Description |
 |---------|-------------|
-| `content-pipeline run` | Run the pipeline |
-| `content-pipeline run --dry-run` | Preview without processing |
-| `content-pipeline status` | Show pending items and stats |
-| `content-pipeline feeds add URL` | Add a feed |
-| `content-pipeline feeds list` | List all feeds |
-| `content-pipeline feeds export` | Export to OPML |
+| `ai-research-assistant run` | Run the pipeline |
+| `ai-research-assistant run --dry-run` | Preview without processing |
+| `ai-research-assistant status` | Show pending items and stats |
+| `ai-research-assistant feeds add URL` | Add a feed |
+| `ai-research-assistant feeds list` | List all feeds |
+| `ai-research-assistant feeds export` | Export to OPML |
 
 ## Dependencies
 

@@ -4,7 +4,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-echo "Installing content-pipeline..."
+echo "Installing ai-research-assistant..."
 
 # Create directories
 mkdir -p ~/.claude/logs
@@ -16,10 +16,10 @@ chmod +x "$PROJECT_DIR/scripts/run.sh"
 chmod +x "$PROJECT_DIR/scripts/uninstall.sh"
 
 # Copy launchd plist
-cp "$PROJECT_DIR/templates/com.claude.content-pipeline.plist" ~/Library/LaunchAgents/
+cp "$PROJECT_DIR/templates/com.claude.ai-research-assistant.plist" ~/Library/LaunchAgents/
 
 # Load the job
-launchctl load ~/Library/LaunchAgents/com.claude.content-pipeline.plist
+launchctl load ~/Library/LaunchAgents/com.claude.ai-research-assistant.plist
 
 # Set wake schedule (requires sudo)
 echo "Setting wake schedule..."
@@ -31,6 +31,6 @@ echo ""
 echo "  Pipeline will run daily at 6:00 AM"
 echo "  Machine will wake at 5:55 AM"
 echo ""
-echo "  Manual run:   cd $PROJECT_DIR && uv run content-pipeline run"
-echo "  Check status: cd $PROJECT_DIR && uv run content-pipeline status"
-echo "  View logs:    tail -f ~/.claude/logs/content-pipeline.log"
+echo "  Manual run:   cd $PROJECT_DIR && uv run ai-research-assistant run"
+echo "  Check status: cd $PROJECT_DIR && uv run ai-research-assistant status"
+echo "  View logs:    tail -f ~/.claude/logs/ai-research-assistant.log"
