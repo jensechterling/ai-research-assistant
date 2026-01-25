@@ -89,3 +89,28 @@ class Database:
     def close(self) -> None:
         """Close database connection."""
         self.conn.close()
+
+    def is_processed(self, entry_guid: str) -> bool:
+        """Check if entry has already been processed."""
+        cursor = self.execute(
+            "SELECT 1 FROM processed_entries WHERE entry_guid = ?",
+            (entry_guid,),
+        )
+        return cursor.fetchone() is not None
+
+    def mark_processed(
+        self,
+        entry_guid: str,
+        feed_id: int,
+        entry_url: str,
+        entry_title: str | None,
+        note_path: Path | None,
+    ) -> None:
+        """Mark entry as successfully processed."""
+        self.execute(
+            """INSERT INTO processed_entries
+               (entry_guid, feed_id, entry_url, entry_title, note_path)
+               VALUES (?, ?, ?, ?, ?)""",
+            (entry_guid, feed_id, entry_url, entry_title, str(note_path) if note_path else None),
+        )
+        self.commit()
