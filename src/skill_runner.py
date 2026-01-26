@@ -92,10 +92,12 @@ class SkillRunner:
             )
 
         if result.returncode != 0:
+            # Error might be in stdout or stderr depending on the CLI
+            error_output = result.stderr.strip() or result.stdout.strip()
             return SkillResult(
                 success=False,
                 note_path=None,
-                error=f"Skill exited with code {result.returncode}: {result.stderr}",
+                error=f"Skill exited with code {result.returncode}: {error_output[:200]}",
                 stdout=result.stdout,
                 stderr=result.stderr,
             )
