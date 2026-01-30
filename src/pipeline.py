@@ -147,7 +147,17 @@ def run_pipeline(db: Database, dry_run: bool = False, limit: int | None = None, 
     # Post-process with /evaluate-knowledge
     if result.created_notes:
         logger.info(f"Running /evaluate-knowledge on {len(result.created_notes)} new notes")
-        file_list = " ".join(f'"{p}"' for p in result.created_notes)
+        # Convert absolute paths to vault-relative paths for the skill
+        vault_path = skill_runner.VAULT_PATH
+        relative_paths = []
+        for p in result.created_notes:
+            try:
+                rel = p.relative_to(vault_path)
+                relative_paths.append(str(rel))
+            except ValueError:
+                # Path not under vault, use as-is
+                relative_paths.append(str(p))
+        file_list = " ".join(f'"{p}"' for p in relative_paths)
         try:
             subprocess.run(
                 [
