@@ -24,7 +24,7 @@ class SkillRunner:
     SKILL_CONFIG = {
         "articles": {
             "skill": "article",
-            "timeout": 180,
+            "timeout": 300,
             "output_folder": "Clippings",
         },
         "youtube": {
@@ -41,6 +41,8 @@ class SkillRunner:
 
     VAULT_PATH = Path.home() / "Obsidian" / "Professional vault"
     SKILLS_PATH = Path.home() / ".claude" / "skills"
+    # Minimal MCP config - only loads Obsidian server for faster startup
+    MCP_CONFIG_PATH = Path(__file__).parent.parent / "config" / "mcp-minimal.json"
 
     def validate_skills(self) -> list[str]:
         """Check that all required skills are installed.
@@ -66,6 +68,8 @@ class SkillRunner:
             result = subprocess.run(
                 [
                     "claude",
+                    "--mcp-config",
+                    str(self.MCP_CONFIG_PATH),
                     "--print",
                     "--dangerously-skip-permissions",
                     f"/{skill_name} {entry.url}",
