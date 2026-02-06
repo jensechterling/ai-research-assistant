@@ -144,10 +144,8 @@ def run_pipeline(db: Database, dry_run: bool = False, limit: int | None = None, 
             if verbose:
                 logger.error(f"    ✗ Exception: {e}")
 
-    # Post-process with /evaluate-knowledge
+    # Post-process with /evaluate-knowledge in batches
     if result.created_notes:
-        logger.info(f"Running /evaluate-knowledge on {len(result.created_notes)} new notes")
-        # Convert absolute paths to vault-relative paths for the skill
         vault_path = skill_runner.VAULT_PATH
         relative_paths = []
         for p in result.created_notes:
@@ -155,22 +153,33 @@ def run_pipeline(db: Database, dry_run: bool = False, limit: int | None = None, 
                 rel = p.relative_to(vault_path)
                 relative_paths.append(str(rel))
             except ValueError:
-                # Path not under vault, use as-is
                 relative_paths.append(str(p))
-        file_list = " ".join(f'"{p}"' for p in relative_paths)
-        try:
-            subprocess.run(
-                [
-                    "claude",
-                    "--print",
-                    "--dangerously-skip-permissions",
-                    f"/evaluate-knowledge {file_list}",
-                ],
-                timeout=600,
-                capture_output=True,
-            )
-        except Exception as e:
-            logger.warning(f"evaluate-knowledge failed: {e}")
+
+        batch_size = 6
+        batches = [relative_paths[i : i + batch_size] for i in range(0, len(relative_paths), batch_size)]
+        logger.info(
+            f"Running /evaluate-knowledge on {len(relative_paths)} new notes "
+            f"({len(batches)} batch{'es' if len(batches) != 1 else ''} of up to {batch_size})"
+        )
+
+        for batch_idx, batch in enumerate(batches, 1):
+            file_list = " ".join(f'"{p}"' for p in batch)
+            try:
+                subprocess.run(
+                    [
+                        "claude",
+                        "--print",
+                        "--dangerously-skip-permissions",
+                        f"/evaluate-knowledge {file_list}",
+                    ],
+                    timeout=600,
+                    capture_output=True,
+                )
+                logger.info(f"    Batch {batch_idx}/{len(batches)} done ({len(batch)} notes)")
+            except subprocess.TimeoutExpired:
+                logger.warning(f"    Batch {batch_idx}/{len(batches)} timed out after 600s, continuing")
+            except Exception as e:
+                logger.warning(f"    Batch {batch_idx}/{len(batches)} failed: {e}, continuing")
 
     # Record run completion
     db.record_run_complete(run_id, result.processed, result.failed)
