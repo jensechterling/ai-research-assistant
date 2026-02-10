@@ -1,5 +1,7 @@
 """Main pipeline orchestration."""
+import fcntl
 import logging
+import os
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -12,6 +14,66 @@ from src.skill_runner import SkillRunner
 
 logger = logging.getLogger(__name__)
 
+LOCK_PATH = Path(__file__).parent.parent / "data" / "pipeline.lock"
+
+
+class PipelineLockError(Exception):
+    """Raised when the pipeline lock cannot be acquired."""
+
+    def __init__(self, pid: int | None = None):
+        self.pid = pid
+        msg = "Pipeline is already running"
+        if pid:
+            msg += f" (PID {pid})"
+        super().__init__(msg)
+
+
+class PipelineLock:
+    """File-based lock using fcntl.flock() to prevent concurrent pipeline runs."""
+
+    def __init__(self, lock_path: Path = LOCK_PATH):
+        self.lock_path = lock_path
+        self._fd: int | None = None
+
+    def acquire(self) -> None:
+        """Acquire the pipeline lock. Raises PipelineLockError if already held."""
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self._fd = os.open(str(self.lock_path), os.O_CREAT | os.O_RDWR)
+        try:
+            fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            # Lock is held — read PID for diagnostics
+            pid = None
+            try:
+                content = os.pread(self._fd, 32, 0).decode().strip()
+                if content:
+                    pid = int(content)
+            except (ValueError, OSError):
+                pass
+            os.close(self._fd)
+            self._fd = None
+            raise PipelineLockError(pid)
+        # Write our PID
+        os.ftruncate(self._fd, 0)
+        os.pwrite(self._fd, str(os.getpid()).encode(), 0)
+
+    def release(self) -> None:
+        """Release the pipeline lock."""
+        if self._fd is not None:
+            try:
+                fcntl.flock(self._fd, fcntl.LOCK_UN)
+                os.close(self._fd)
+            except OSError:
+                pass
+            self._fd = None
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *args):
+        self.release()
+
 
 @dataclass
 class PipelineResult:
@@ -21,12 +83,35 @@ class PipelineResult:
     failed: int = 0
     retried: int = 0
     skipped: int = 0
+    permanent_failures: int = 0
     created_notes: list[Path] = field(default_factory=list)
     failures: list[tuple[Entry, str]] = field(default_factory=list)
 
 
-def run_pipeline(db: Database, dry_run: bool = False, limit: int | None = None, verbose: bool = False) -> PipelineResult:
+def run_pipeline(db: Database, dry_run: bool = False, limit: int | None = None, verbose: bool = False, force: bool = False) -> PipelineResult:
     """Execute the content pipeline."""
+    # Acquire lock (skip for dry-run)
+    lock = None
+    if not dry_run:
+        lock = PipelineLock(LOCK_PATH)
+        if force:
+            try:
+                lock.acquire()
+            except PipelineLockError as e:
+                logger.warning(f"Force override: {e}")
+                lock = None
+        else:
+            lock.acquire()
+
+    try:
+        return _run_pipeline_inner(db, dry_run, limit, verbose)
+    finally:
+        if lock is not None:
+            lock.release()
+
+
+def _run_pipeline_inner(db: Database, dry_run: bool, limit: int | None, verbose: bool) -> PipelineResult:
+    """Inner pipeline logic (called with lock held)."""
     feed_manager = FeedManager(db)
     skill_runner = SkillRunner()
 
@@ -124,19 +209,25 @@ def run_pipeline(db: Database, dry_run: bool = False, limit: int | None = None, 
                 if verbose:
                     logger.info(f"    ✓ Created: {skill_result.note_path.name}")
             else:
-                # Add to retry queue
-                db.add_to_retry_queue(
-                    entry_guid=entry.guid,
-                    feed_id=entry.feed_id,
-                    entry_url=entry.url,
-                    entry_title=entry.title,
-                    category=entry.category,
-                    error=skill_result.error or "Unknown error",
-                )
-                result.failed += 1
-                result.failures.append((entry, skill_result.error or "Unknown error"))
-                if verbose:
-                    logger.error(f"    ✗ {skill_result.error}")
+                error_msg = skill_result.error or "Unknown error"
+                if skill_result.permanent:
+                    # Permanent failure — skip retry queue
+                    result.permanent_failures += 1
+                    logger.warning(f"[PERMANENT] {entry.title}: {error_msg}")
+                else:
+                    # Transient failure — add to retry queue
+                    db.add_to_retry_queue(
+                        entry_guid=entry.guid,
+                        feed_id=entry.feed_id,
+                        entry_url=entry.url,
+                        entry_title=entry.title,
+                        category=entry.category,
+                        error=error_msg,
+                    )
+                    result.failed += 1
+                    result.failures.append((entry, error_msg))
+                    if verbose:
+                        logger.error(f"    ✗ {error_msg}")
 
         except Exception as e:
             db.add_to_retry_queue(
@@ -204,16 +295,20 @@ def send_notification(result: PipelineResult) -> None:
 
     if result.skipped > 0:
         message = f"Dry run: {result.skipped} items previewed"
-    elif result.processed == 0 and result.failed == 0:
+    elif result.processed == 0 and result.failed == 0 and result.permanent_failures == 0:
         message = "No items to process"
     elif result.failed > 0:
         message = f"Processed {result.processed}, Failed {result.failed}"
+        if result.permanent_failures > 0:
+            message += f", {result.permanent_failures} skipped (paywall)"
         first_fail = result.failures[0]
         message += f"\nFirst failure: {first_fail[0].title[:30]}..."
     else:
         message = f"Processed {result.processed} items"
         if result.retried > 0:
             message += f" ({result.retried} retried)"
+        if result.permanent_failures > 0:
+            message += f", {result.permanent_failures} skipped (paywall)"
 
     try:
         subprocess.run(

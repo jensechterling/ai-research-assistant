@@ -26,16 +26,21 @@ def cli():
 @click.option("--dry-run", is_flag=True, help="Show what would be processed without doing it")
 @click.option("--limit", "-n", type=int, default=None, help="Limit number of items to process")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed progress during execution")
-def run(dry_run: bool, limit: int | None, verbose: bool):
+@click.option("--force", is_flag=True, help="Override pipeline lock if another run is in progress")
+def run(dry_run: bool, limit: int | None, verbose: bool, force: bool):
     """Run the content pipeline."""
     import logging
 
-    from src.pipeline import run_pipeline
+    from src.pipeline import PipelineLockError, run_pipeline
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     db = get_db()
-    result = run_pipeline(db, dry_run=dry_run, limit=limit, verbose=verbose)
+    try:
+        result = run_pipeline(db, dry_run=dry_run, limit=limit, verbose=verbose, force=force)
+    except PipelineLockError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
 
     click.echo(f"Processed: {result.processed}, Failed: {result.failed}")
     if result.retried:
