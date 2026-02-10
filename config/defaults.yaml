@@ -1,0 +1,43 @@
+# Default configuration for AI Research Assistant for Obsidian
+# Override any value in config/user.yaml (created by: ai-research-assistant setup)
+
+# Obsidian vault
+vault:
+  path: null  # Required — set during setup
+
+# Vault folder paths (relative to vault root)
+folders:
+  youtube: "Clippings/Youtube extractions"
+  podcast: "Clippings/Podcast extractions"
+  article: "Clippings/Article extractions"
+  knowledge_base: "Knowledge Base"
+  daily_notes: "Daily Notes"
+  clippings: "Clippings"
+  templates: "Templates"
+
+# Interest profile
+profile:
+  interest_profile: "interest-profile.md"
+
+# Processing timeouts (seconds)
+processing:
+  article_timeout: 300
+  youtube_timeout: 300
+  podcast_timeout: 600
+  evaluate_batch_size: 6
+  evaluate_timeout: 600
+
+# Retry settings
+retry:
+  max_attempts: 4
+  backoff_hours: [1, 4, 12, 24]
+
+# Feed polling
+feeds:
+  request_timeout: 30
+  user_agent: "AI-Research-Assistant/1.0"
+
+# Schedule (for launchd plist generation)
+schedule:
+  hour: 6
+  minute: 0

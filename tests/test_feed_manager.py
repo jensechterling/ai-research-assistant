@@ -2,8 +2,6 @@
 import tempfile
 from pathlib import Path
 
-import pytest
-
 
 def test_add_feed_stores_in_database():
     """add_feed should store feed in database with auto-detected title."""

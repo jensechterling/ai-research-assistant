@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Automated RSS pipeline that fetches articles, YouTube videos, and podcasts, then invokes Claude Code skills (`/article`, `/youtube`, `/podcast`) to create Obsidian notes.
+Automated RSS pipeline that fetches articles, YouTube videos, and podcasts, then invokes Claude Code skills (`/article`, `/youtube`, `/podcast`) to create personalized Obsidian notes. Skills are bundled as Jinja2 templates and rendered during setup with user-specific configuration.
 
 ## Commands
 
@@ -25,6 +25,9 @@ uv run ai-research-assistant feeds add URL -c articles
 uv run ai-research-assistant feeds list
 uv run ai-research-assistant status
 
+# Setup / upgrade
+uv run ai-research-assistant setup
+
 # Lint
 uv run ruff check src/ tests/
 ```
@@ -42,19 +45,25 @@ User subscribes to feeds → FeedManager fetches RSS → Pipeline processes entr
 4. Success → `mark_processed()`, Failure → `add_to_retry_queue()` with exponential backoff (1h, 4h, 12h, 24h)
 5. Post-process with `/evaluate-knowledge` skill
 
-**Key design decisions:**
-- Skills live in separate repo (`obsidian-workflow-skills`) - this repo is purely automation
-- `SkillRunner.validate_skills()` checks `~/.claude/skills/` before running to fail fast
-- Note path extracted from skill stdout (patterns: `**path.md**` or `` `path.md` ``)
-- SQLite database in `data/pipeline.db` tracks processed entries, retry queue, run history
+**Configuration (`src/config.py`):**
+- `config/defaults.yaml` — version-controlled defaults
+- `config/user.yaml` — gitignored user overrides (created by `setup`)
+- `load_config()` deep-merges user over defaults
+- All paths and folders come from config, never hardcoded
+
+**Skills (`skills/`):**
+- Templates live in `skills/_templates/` as Jinja2 `.md` files
+- `setup` renders them into `skills/{name}/` using config values
+- Generated skills are symlinked to `~/.claude/skills/`
+- Template variables: `{{ folders.youtube }}`, `{{ profile.interest_profile }}`, etc.
 
 **Category → Skill mapping** (`src/skill_runner.py`):
-- `articles` → `/article` (120s timeout) → `Clippings/`
-- `youtube` → `/youtube` (300s timeout) → `Clippings/Youtube extractions/`
-- `podcasts` → `/podcast` (600s timeout) → `Clippings/`
+- `articles` → `/article` → configured article folder
+- `youtube` → `/youtube` → configured youtube folder
+- `podcasts` → `/podcast` → configured clippings folder
 
-## Dependencies
-
-Skills must be installed from [obsidian-workflow-skills](https://github.com/jensechterling/obsidian-workflow-skills) to `~/.claude/skills/`.
-
-Vault path hardcoded: `~/Obsidian/Professional vault/`
+**Key design decisions:**
+- Skills bundled in this repo as Jinja2 templates — no separate skills repo needed
+- `SkillRunner` reads all paths from `src/config.py`, never hardcoded
+- `setup` wizard handles first-time config AND upgrades (re-renders templates)
+- SQLite database in `data/pipeline.db` tracks processed entries, retry queue, run history

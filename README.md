@@ -1,89 +1,173 @@
-# AI Research Assistant
+# AI Research Assistant for Obsidian
 
-Automated research pipeline that fetches articles, YouTube videos, and podcasts from RSS feeds and creates structured Obsidian notes using Claude Code skills.
+Automated RSS pipeline that fetches articles, YouTube videos, and podcasts, then uses [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skills to create personalized analysis notes in your Obsidian vault.
 
-## Features
+```
+RSS Feeds → Pipeline → Claude Code Skills → Obsidian Notes
+```
 
-- **Feed Management**: Subscribe to RSS feeds via CLI
-- **Multi-Format Support**: Articles, YouTube, Podcasts
-- **Personalized Summaries**: Uses your interest profile for relevant insights
-- **Automatic Retry**: Failed items retry with exponential backoff
-- **Daily Automation**: Runs automatically via launchd
+Each note includes a management summary, key findings, and personalized suggestions for work and personal life — based on your interest profile.
+
+## What It Does
+
+- **Articles**: Extracts web articles, generates analysis with key findings and suggestions
+- **YouTube**: Downloads transcripts, creates summaries with clickable timestamp timelines
+- **Podcasts**: Finds existing transcripts from RSS feeds, generates analysis
+- **Evaluate Knowledge**: Post-processes new notes with personalized takeaways
+
+## Requirements
+
+- **Python 3.11+** and [uv](https://docs.astral.sh/uv/)
+- **Claude Code CLI** — [install instructions](https://docs.anthropic.com/en/docs/claude-code)
+- **Obsidian** with a vault you want notes delivered to
+- **Node.js** (for Obsidian MCP server via npx)
+- **yt-dlp** (for YouTube transcripts) — `brew install yt-dlp`
 
 ## Quick Start
 
 ```bash
-# Install dependencies
+# Clone and install
+git clone https://github.com/jensechterling/ai-research-assistant-for-obsidian.git
+cd ai-research-assistant-for-obsidian
 uv sync
 
-# Install required skills (see Prerequisites)
+# Run setup wizard
+uv run ai-research-assistant setup
 
 # Add some feeds
-uv run ai-research-assistant feeds add "https://stratechery.com/feed/" -c articles
+uv run ai-research-assistant feeds add https://example.com/feed.xml -c articles
+uv run ai-research-assistant feeds add "https://www.youtube.com/feeds/videos.xml?channel_id=CHANNEL_ID" -c youtube
 
-# Run manually
-uv run ai-research-assistant run
+# Test run
+uv run ai-research-assistant run --dry-run
 
-# Check status
-uv run ai-research-assistant status
+# Real run
+uv run ai-research-assistant run -v
 ```
 
-## Prerequisites
+## Setup
 
-### 1. Claude Code Skills
+The setup wizard (`ai-research-assistant setup`) handles everything:
 
-This pipeline requires skills from [obsidian-workflow-skills](https://github.com/jensechterling/obsidian-workflow-skills):
+1. Asks for your Obsidian vault path
+2. Shows default folder structure (customizable)
+3. Generates skill files and configuration
+4. Installs skills to `~/.claude/skills/`
+5. Creates an interest profile template in your vault
+6. Checks dependencies
+
+### Interest Profile
+
+During setup, you can either create a new interest profile from a template or link an existing file in your vault. Fill it in with your work context and personal interests — this is how the skills personalize suggestions for you.
+
+### Scheduled Runs
+
+To run the pipeline daily on a schedule:
 
 ```bash
-# Clone the skills repo
-git clone https://github.com/jensechterling/obsidian-workflow-skills.git
-
-# Install skills to Claude Code
-cd obsidian-workflow-skills
-./install.sh
+uv run ai-research-assistant setup --install-schedule
 ```
 
-Required skills: `article`, `youtube`, `podcast`
+This auto-detects your platform:
 
-### 2. Obsidian Vault
+- **macOS**: Installs a launchd job (default: daily at 6:00 AM)
+- **Linux**: Installs a cron job (default: daily at 6:00 AM)
+- **Windows**: Prints instructions for manual Task Scheduler setup
 
-Skills write notes to your Obsidian vault. Ensure you have:
-- Vault at `~/Obsidian/Professional vault/` (or update `VAULT_PATH` in `src/skill_runner.py`)
-- `interest-profile.md` in vault root for personalized suggestions
+To customize the schedule time, set `schedule.hour` and `schedule.minute` in `config/user.yaml` and re-run setup.
 
-## Installation
+To remove the schedule:
+- **macOS**: `launchctl unload ~/Library/LaunchAgents/com.claude.ai-research-assistant.plist`
+- **Linux**: `crontab -e` and remove the `# ai-research-assistant` lines
 
-```bash
-# Clone repo
-git clone https://github.com/jensechterling/ai-research-assistant.git
-cd ai-research-assistant
+## Configuration
 
-# Install dependencies
-uv sync
+All configuration lives in `config/user.yaml` (created by setup). Defaults are in `config/defaults.yaml`.
 
-# Install automation (runs daily at 6 AM)
-./scripts/install.sh
+```yaml
+# config/user.yaml — your overrides
+vault:
+  path: "~/Obsidian/My vault"
+
+folders:
+  youtube: "Clippings/Youtube extractions"
+  podcast: "Clippings/Podcast extractions"
+  article: "Clippings/Article extractions"
+  knowledge_base: "Knowledge Base"
+  daily_notes: "Daily Notes"
+  clippings: "Clippings"
+  templates: "Templates"
+
+schedule:
+  hour: 6
+  minute: 0
 ```
+
+After editing config, re-run `ai-research-assistant setup` to regenerate templates.
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `ai-research-assistant run` | Run the pipeline |
-| `ai-research-assistant run --limit N` | Process only N items (for testing) |
-| `ai-research-assistant run --dry-run` | Preview without processing |
-| `ai-research-assistant status` | Show pending items and stats |
-| `ai-research-assistant feeds add URL` | Add a feed |
-| `ai-research-assistant feeds list` | List all feeds |
-| `ai-research-assistant feeds export` | Export to OPML |
-| `ai-research-assistant feeds import FILE` | Import from OPML |
+```bash
+# Pipeline
+ai-research-assistant run                  # Process all pending items
+ai-research-assistant run --dry-run        # Preview without processing
+ai-research-assistant run -v --limit 3     # Verbose, max 3 items
+ai-research-assistant status               # Show pending items and last run
 
-## Dependencies
+# Feeds
+ai-research-assistant feeds add URL -c articles|youtube|podcasts
+ai-research-assistant feeds list
+ai-research-assistant feeds remove URL
+ai-research-assistant feeds export         # OPML export
+ai-research-assistant feeds import file.opml
+```
 
-- Python 3.11+
-- uv (package manager)
-- Claude Code CLI
-- [obsidian-workflow-skills](https://github.com/jensechterling/obsidian-workflow-skills)
+## Upgrading
+
+```bash
+git pull
+uv sync
+uv run ai-research-assistant setup
+```
+
+The setup wizard detects existing configuration and silently re-renders templates from updated sources. Your `config/user.yaml` and vault content are never touched.
+
+## Architecture
+
+```
+config/
+  defaults.yaml          # Sensible defaults (version-controlled)
+  user.yaml              # Your overrides (gitignored, created by setup)
+skills/
+  _templates/            # Jinja2 templates (version-controlled)
+    article/
+    youtube/
+    podcast/
+    evaluate-knowledge/
+  article/               # Generated from templates (gitignored)
+  youtube/               # Symlinked to ~/.claude/skills/
+  ...
+src/
+  pipeline.py            # Main orchestration
+  skill_runner.py        # Invokes Claude Code skills
+  config.py              # Configuration loading
+  setup.py               # Setup wizard
+  feed_manager.py        # RSS feed management
+  database.py            # SQLite tracking
+```
+
+## How It Works
+
+1. `FeedManager` fetches unprocessed RSS entries
+2. `Database` retrieves failed items due for retry (exponential backoff: 1h, 4h, 12h, 24h)
+3. For each entry, `SkillRunner` invokes the appropriate Claude Code skill (`/article`, `/youtube`, `/podcast`)
+4. Skills read your interest profile, process content, and write notes to Obsidian via MCP
+5. New notes are post-processed with `/evaluate-knowledge` for additional personalized takeaways
+6. Results are tracked in SQLite (`data/pipeline.db`)
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## License
 

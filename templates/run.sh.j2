@@ -2,15 +2,15 @@
 set -e
 
 # Navigate to project directory
-cd "/Users/jens.echterling/GitHub/Development/AI research assistant"
+cd "{{ project_dir }}"
 
 # Load environment variables (if any)
 if [ -f .env ]; then
     source .env
 fi
 
-# uv is installed in ~/.local/bin (not in launchd PATH)
-UV="/Users/jens.echterling/.local/bin/uv"
+# uv may not be in launchd PATH
+UV="{{ uv_path }}"
 
 # Run pipeline
 $UV run ai-research-assistant run

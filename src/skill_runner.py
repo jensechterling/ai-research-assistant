@@ -4,6 +4,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.config import get_folder, get_project_dir, get_skills_path, get_vault_path, load_config
 from src.models import Entry
 
 
@@ -21,28 +22,32 @@ class SkillResult:
 class SkillRunner:
     """Invoke Claude Code skills via CLI."""
 
-    SKILL_CONFIG = {
-        "articles": {
-            "skill": "article",
-            "timeout": 300,
-            "output_folder": "Clippings",
-        },
-        "youtube": {
-            "skill": "youtube",
-            "timeout": 300,
-            "output_folder": "Clippings/Youtube extractions",
-        },
-        "podcasts": {
-            "skill": "podcast",
-            "timeout": 600,
-            "output_folder": "Clippings",
-        },
-    }
+    def __init__(self, config: dict | None = None):
+        self._config = config or load_config()
+        self._vault_path = get_vault_path(self._config)
+        self._skills_path = get_skills_path()
+        self._mcp_config_path = get_project_dir() / "config" / "mcp-minimal.json"
+        self._skill_config = {
+            "articles": {
+                "skill": "article",
+                "timeout": self._config["processing"]["article_timeout"],
+                "output_folder": get_folder("article", self._config),
+            },
+            "youtube": {
+                "skill": "youtube",
+                "timeout": self._config["processing"]["youtube_timeout"],
+                "output_folder": get_folder("youtube", self._config),
+            },
+            "podcasts": {
+                "skill": "podcast",
+                "timeout": self._config["processing"]["podcast_timeout"],
+                "output_folder": get_folder("clippings", self._config),
+            },
+        }
 
-    VAULT_PATH = Path.home() / "Obsidian" / "Professional vault"
-    SKILLS_PATH = Path.home() / ".claude" / "skills"
-    # Minimal MCP config - only loads Obsidian server for faster startup
-    MCP_CONFIG_PATH = Path(__file__).parent.parent / "config" / "mcp-minimal.json"
+    @property
+    def vault_path(self) -> Path:
+        return self._vault_path
 
     def validate_skills(self) -> list[str]:
         """Check that all required skills are installed.
@@ -50,16 +55,16 @@ class SkillRunner:
         Returns list of missing skill names. Empty list means all OK.
         """
         missing = []
-        for category, config in self.SKILL_CONFIG.items():
+        for category, config in self._skill_config.items():
             skill_name = config["skill"]
-            skill_path = self.SKILLS_PATH / skill_name
+            skill_path = self._skills_path / skill_name
             if not skill_path.exists():
                 missing.append(skill_name)
         return missing
 
     def run_skill(self, entry: Entry) -> SkillResult:
         """Invoke appropriate skill for entry and verify output."""
-        config = self.SKILL_CONFIG[entry.category]
+        config = self._skill_config[entry.category]
         skill_name = config["skill"]
         timeout = config["timeout"]
         output_folder = config["output_folder"]
@@ -69,7 +74,7 @@ class SkillRunner:
                 [
                     "claude",
                     "--mcp-config",
-                    str(self.MCP_CONFIG_PATH),
+                    str(self._mcp_config_path),
                     "--print",
                     "--dangerously-skip-permissions",
                     f"/{skill_name} {entry.url}",
@@ -144,7 +149,7 @@ class SkillRunner:
         - "Note saved to Clippings/Youtube extractions/Title.md"
         - "Successfully wrote note to Clippings/Article extractions/Title.md"
         """
-        output_dir = self.VAULT_PATH / folder
+        output_dir = self._vault_path / folder
 
         # Pattern 1: **Folder/Filename.md** (bold markdown)
         bold_pattern = r"\*\*([^*]+\.md)\*\*"
@@ -152,7 +157,7 @@ class SkillRunner:
         if match:
             relative_path = match.group(1)
             if "/" in relative_path:
-                return self.VAULT_PATH / relative_path
+                return self._vault_path / relative_path
             return output_dir / relative_path
 
         # Pattern 2: `Folder/Filename.md` (backtick code format)
@@ -161,14 +166,14 @@ class SkillRunner:
         if match:
             relative_path = match.group(1)
             if "/" in relative_path:
-                return self.VAULT_PATH / relative_path
+                return self._vault_path / relative_path
             return output_dir / relative_path
 
         # Pattern 3: Folder/path.md (allows spaces in filename, stops at .md)
         path_pattern = rf"({re.escape(folder)}/[^\n]+?\.md)"
         match = re.search(path_pattern, stdout)
         if match:
-            return self.VAULT_PATH / match.group(1)
+            return self._vault_path / match.group(1)
 
         # Pattern 4: "wrote/written/saved/created ... to/at/in path.md"
         action_pattern = r"(?:wrote|written|saved|created)[^\n]*?(?:to|at|in)\s+([A-Za-z][^\n]+?\.md)"
@@ -176,7 +181,7 @@ class SkillRunner:
         if match:
             filename = match.group(1).strip()
             if "/" in filename:
-                return self.VAULT_PATH / filename
+                return self._vault_path / filename
             return output_dir / filename
 
         return None

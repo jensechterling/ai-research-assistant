@@ -34,7 +34,7 @@ def run_pipeline(db: Database, dry_run: bool = False, limit: int | None = None, 
     missing_skills = skill_runner.validate_skills()
     if missing_skills:
         logger.error(f"Missing required skills: {', '.join(missing_skills)}")
-        logger.error("Install skills from obsidian-workflow-skills repo to ~/.claude/skills/")
+        logger.error("Run 'ai-research-assistant setup' to install skills")
         return PipelineResult()
 
     # Check for catch-up (missed runs)
@@ -154,7 +154,7 @@ def run_pipeline(db: Database, dry_run: bool = False, limit: int | None = None, 
 
     # Post-process with /evaluate-knowledge in batches
     if result.created_notes:
-        vault_path = skill_runner.VAULT_PATH
+        vault_path = skill_runner.vault_path
         relative_paths = []
         for p in result.created_notes:
             try:

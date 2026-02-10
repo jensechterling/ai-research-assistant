@@ -12,6 +12,7 @@ logs/*.log
 __pycache__/
 *.pyc
 .pytest_cache/
+.ruff_cache/
 
 # macOS
 .DS_Store
@@ -19,3 +20,14 @@ __pycache__/
 # IDE
 .idea/
 .vscode/
+
+# User config (created by setup wizard)
+config/user.yaml
+
+# Generated files (rendered from templates by setup wizard)
+config/mcp-minimal.json
+scripts/run.sh
+skills/article/
+skills/youtube/
+skills/podcast/
+skills/evaluate-knowledge/

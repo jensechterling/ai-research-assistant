@@ -1,9 +1,6 @@
 """Tests for database module."""
 import tempfile
 from pathlib import Path
-from datetime import timedelta
-
-import pytest
 
 
 def test_database_creates_tables():

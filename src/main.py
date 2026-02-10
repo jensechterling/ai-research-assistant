@@ -161,5 +161,9 @@ def feeds_import(opml_file: str):
     click.echo(f"Imported {count} feeds")
 
 
+from src.setup import setup  # noqa: E402
+
+cli.add_command(setup)
+
 if __name__ == "__main__":
     cli()

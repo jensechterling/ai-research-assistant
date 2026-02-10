@@ -7,29 +7,29 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/jens.echterling/GitHub/Development/AI research assistant/scripts/run.sh</string>
+        <string>{{ project_dir }}/scripts/run.sh</string>
     </array>
 
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
-        <integer>6</integer>
+        <integer>{{ schedule.hour }}</integer>
         <key>Minute</key>
-        <integer>0</integer>
+        <integer>{{ schedule.minute }}</integer>
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/jens.echterling/.claude/logs/ai-research-assistant.log</string>
+    <string>{{ home_dir }}/.claude/logs/ai-research-assistant.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/jens.echterling/.claude/logs/ai-research-assistant.log</string>
+    <string>{{ home_dir }}/.claude/logs/ai-research-assistant.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
         <key>HOME</key>
-        <string>/Users/jens.echterling</string>
+        <string>{{ home_dir }}</string>
     </dict>
 </dict>
 </plist>

@@ -1,0 +1,2 @@
+# ai-research-assistant scheduled run
+{{ schedule.minute }} {{ schedule.hour }} * * * {{ project_dir }}/scripts/run.sh >> {{ home_dir }}/.claude/logs/ai-research-assistant.log 2>&1
