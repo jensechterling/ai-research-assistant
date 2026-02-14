@@ -169,6 +169,39 @@ src/
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
 
+## Logging
+
+**Log files:** `~/code/ai-research-assistant/logs/pipeline.log`
+
+Daily rotating logs with automatic cleanup (30 day retention).
+
+**Log levels:**
+- File: DEBUG (all details)
+- Console: INFO (summary only)
+
+**Verbose mode:**
+```bash
+uv run ai-research-assistant run --verbose  # Shows DEBUG in console too
+```
+
+**View logs:**
+```bash
+# Today's log
+tail -f ~/code/ai-research-assistant/logs/pipeline.log
+
+# Last 100 lines
+tail -100 ~/code/ai-research-assistant/logs/pipeline.log
+
+# Search for errors
+grep ERROR ~/code/ai-research-assistant/logs/*.log
+
+# Performance analysis
+grep "Created:" ~/code/ai-research-assistant/logs/pipeline.log
+```
+
+**Configuration:**
+- Retention days: `config/user.yaml` → `logging.retention_days: 30`
+
 ## Contributing
 
 This is a personal project. I'm not accepting pull requests or feature requests, but you're welcome to fork and adapt it for your own use.
