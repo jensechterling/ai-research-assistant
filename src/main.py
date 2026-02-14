@@ -31,9 +31,17 @@ def run(dry_run: bool, limit: int | None, verbose: bool, force: bool):
     """Run the content pipeline."""
     import logging
 
+    from src.config import get_project_dir, load_config
+    from src.logging_config import setup_logging
     from src.pipeline import PipelineLockError, run_pipeline
 
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    # Initialize logging
+    config = load_config()
+    log_dir = get_project_dir() / "logs"
+    retention_days = config.get("logging", {}).get("retention_days", 30)
+    setup_logging(log_dir, retention_days, verbose)
+    logger = logging.getLogger(__name__)
+    logger.info("ai-research-assistant starting")
 
     db = get_db()
     try:
