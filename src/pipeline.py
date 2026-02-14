@@ -264,6 +264,10 @@ def _run_pipeline_inner(db: Database, dry_run: bool, limit: int | None, verbose:
         for batch_idx, batch in enumerate(batches, 1):
             file_list = " ".join(f'"{p}"' for p in batch)
             try:
+                # Allow nested Claude sessions by unsetting CLAUDECODE env var
+                env = os.environ.copy()
+                env["CLAUDECODE"] = ""
+
                 subprocess.run(
                     [
                         "claude",
@@ -273,6 +277,7 @@ def _run_pipeline_inner(db: Database, dry_run: bool, limit: int | None, verbose:
                     ],
                     timeout=600,
                     capture_output=True,
+                    env=env,
                 )
                 logger.info(f"    Batch {batch_idx}/{len(batches)} done ({len(batch)} notes)")
             except subprocess.TimeoutExpired:

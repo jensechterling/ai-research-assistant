@@ -1,4 +1,5 @@
 """Claude Code skill invocation."""
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -85,6 +86,10 @@ class SkillRunner:
         output_folder = config["output_folder"]
 
         try:
+            # Allow nested Claude sessions by unsetting CLAUDECODE env var
+            env = os.environ.copy()
+            env["CLAUDECODE"] = ""
+
             result = subprocess.run(
                 [
                     "claude",
@@ -97,6 +102,7 @@ class SkillRunner:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                env=env,
             )
         except subprocess.TimeoutExpired:
             return SkillResult(
