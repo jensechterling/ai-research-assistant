@@ -19,6 +19,9 @@
       <outline type="rss" text="Essays - Benedict Evans" title="Essays - Benedict Evans" xmlUrl="https://www.ben-evans.com/benedictevans?format=rss" />
       <outline type="rss" text="Simon Willison's Weblog" title="Simon Willison's Weblog" xmlUrl="https://simonwillison.net/atom/everything/" />
       <outline type="rss" text="PKM Weekly" title="PKM Weekly" xmlUrl="https://www.pkmweekly.com/feed" />
+      <outline type="rss" text="Martin Fowler" title="Martin Fowler" xmlUrl="https://martinfowler.com/feed.atom" />
+      <outline type="rss" text="a16z" title="a16z" xmlUrl="https://a16z.com/feed/" />
+      <outline type="rss" text="Platformer" title="Platformer" xmlUrl="https://www.platformer.news/feed" />
     </outline>
   </body>
 </opml>
