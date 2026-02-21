@@ -16,7 +16,6 @@ def _default_template_vars():
     return {
         "vault_path": "/tmp/test-vault",
         "project_dir": str(project_dir),
-        "uv_path": "/usr/local/bin/uv",
         "home_dir": "/tmp/test-home",
         "folders": config["folders"],
         "profile": config["profile"],
@@ -112,7 +111,6 @@ def test_infra_templates_render_without_error():
 
     infra_templates = [
         "mcp-minimal.json.j2",
-        "run.sh.j2",
         "com.claude.ai-research-assistant.plist.j2",
     ]
 

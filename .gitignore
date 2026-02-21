@@ -26,7 +26,7 @@ config/user.yaml
 
 # Generated files (rendered from templates by setup wizard)
 config/mcp-minimal.json
-scripts/run.sh
+templates/com.claude.ai-research-assistant.plist
 skills/article/
 skills/youtube/
 skills/podcast/

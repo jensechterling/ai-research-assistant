@@ -2,6 +2,7 @@
 import os
 import shutil
 import stat
+import sys
 from pathlib import Path
 
 import click
@@ -20,7 +21,6 @@ def _render_templates(config: dict) -> None:
     template_vars = {
         "vault_path": str(Path(config["vault"]["path"]).expanduser()),
         "project_dir": str(project_dir),
-        "uv_path": shutil.which("uv") or str(Path.home() / ".local" / "bin" / "uv"),
         "home_dir": str(Path.home()),
         "folders": config["folders"],
         "profile": config["profile"],
@@ -61,12 +61,10 @@ def _render_templates(config: dict) -> None:
     rendered = template.render(**template_vars)
     (project_dir / "config" / "mcp-minimal.json").write_text(rendered)
 
-    # run.sh
-    template = infra_env.get_template("run.sh.j2")
-    rendered = template.render(**template_vars)
+    # Ensure run.sh is executable (it's now a version-controlled plain script)
     run_sh = project_dir / "scripts" / "run.sh"
-    run_sh.write_text(rendered)
-    run_sh.chmod(run_sh.stat().st_mode | stat.S_IEXEC)
+    if run_sh.exists():
+        run_sh.chmod(run_sh.stat().st_mode | stat.S_IEXEC)
 
     # launchd plist
     template = infra_env.get_template("com.claude.ai-research-assistant.plist.j2")
@@ -261,6 +259,17 @@ def setup(install_schedule: bool):
     _render_templates(config)
     click.echo("  Templates rendered.")
 
+    # Check for stale installed plist
+    if sys.platform == "darwin" and not install_schedule:
+        plist_source = project_dir / "templates" / "com.claude.ai-research-assistant.plist"
+        plist_target = Path.home() / "Library" / "LaunchAgents" / "com.claude.ai-research-assistant.plist"
+        if plist_source.exists() and plist_target.exists():
+            if plist_source.read_text() != plist_target.read_text():
+                click.echo(
+                    "\n  Warning: installed schedule is out of date."
+                    " Re-run with --install-schedule to update."
+                )
+
     # Install skills
     click.echo("\nInstalling skills to ~/.claude/skills/...")
     _install_skills()
@@ -280,8 +289,6 @@ def setup(install_schedule: bool):
 
     # Optional: install schedule
     if install_schedule:
-        import sys
-
         click.echo("\nInstalling schedule...")
 
         if sys.platform == "darwin":
