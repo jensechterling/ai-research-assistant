@@ -26,7 +26,7 @@ The setup wizard SHALL render all Jinja2 templates (skills and infrastructure) u
 
 #### Scenario: Infrastructure templates rendered
 - **WHEN** setup completes
-- **THEN** `config/mcp-minimal.json` contains the user's vault path, and `scripts/run.sh` contains the project directory path
+- **THEN** the launchd plist contains the project directory path, and `config/mcp-minimal.json` is not created
 
 ### Requirement: Skill installation via symlinks
 The setup wizard SHALL create symlinks from generated skill directories to `~/.claude/skills/`.
@@ -74,8 +74,20 @@ The setup wizard SHALL check for required external dependencies and warn about m
 
 #### Scenario: Missing yt-dlp
 - **WHEN** `yt-dlp` is not in PATH
-- **THEN** setup warns the user and suggests `brew install yt-dlp`
+- **THEN** setup warns that the manually used YouTube skill needs it and suggests `brew install yt-dlp`
 
 #### Scenario: Missing claude CLI
 - **WHEN** `claude` is not in PATH
-- **THEN** setup warns the user with installation instructions
+- **THEN** setup warns that the manually used skills need the Claude Code CLI, and states that the scheduled pipeline does not
+
+#### Scenario: npx not checked
+- **WHEN** setup runs
+- **THEN** it does not check for `npx`
+
+#### Scenario: Missing Melious API key
+- **WHEN** no key is found in the environment, `.env` or the configured Keychain item
+- **THEN** setup warns the user and shows how to add `MELIOUS_API_KEY` to `.env` or to the Keychain
+
+#### Scenario: Melious API key present
+- **WHEN** a key is found
+- **THEN** setup sends one minimal request to the configured endpoint and model, and reports whether the key and model were accepted, without printing the key
