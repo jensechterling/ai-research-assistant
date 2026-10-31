@@ -1,3 +1,11 @@
+# setup-wizard Specification
+
+## Purpose
+
+Collects user configuration on first run, renders skill and infrastructure templates, installs skills, and checks external dependencies; re-running it upgrades an existing install.
+
+## Requirements
+
 ### Requirement: Interactive first-time setup
 The system SHALL provide a `setup` CLI subcommand that interactively collects user configuration (vault path, folder preferences) and writes `config/user.yaml`.
 

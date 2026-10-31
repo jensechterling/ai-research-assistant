@@ -26,11 +26,5 @@ fi
 # Run pipeline
 $UV run ai-research-assistant run
 
-# Weekly OPML backup (Mondays)
-DAY_OF_WEEK=$(date +%u)
-if [ "$DAY_OF_WEEK" -eq 1 ]; then
-    $UV run ai-research-assistant feeds export
-    git add exports/feeds.opml
-    git diff --cached --quiet || git commit -m "Weekly OPML backup $(date +%Y-%m-%d)"
-    git push
-fi
+# Weekly OPML backup (Mondays, master only)
+UV="$UV" "$SCRIPT_DIR/backup_feeds.sh"

@@ -10,6 +10,7 @@ import yaml
 from jinja2 import Environment, FileSystemLoader
 
 from src.config import get_project_dir, is_configured, load_config
+from src.llm import FatalRunError, LLMError, MeliousClient, resolve_api_key
 
 
 SKILLS = ["article", "youtube", "podcast", "evaluate-knowledge"]
@@ -55,11 +56,6 @@ def _render_templates(config: dict) -> None:
         loader=FileSystemLoader(str(project_dir / "templates")),
         keep_trailing_newline=True,
     )
-
-    # mcp-minimal.json
-    template = infra_env.get_template("mcp-minimal.json.j2")
-    rendered = template.render(**template_vars)
-    (project_dir / "config" / "mcp-minimal.json").write_text(rendered)
 
     # Ensure run.sh is executable (it's now a version-controlled plain script)
     run_sh = project_dir / "scripts" / "run.sh"
@@ -123,15 +119,40 @@ def _check_dependencies() -> list[str]:
     warnings = []
 
     if not shutil.which("claude"):
-        warnings.append("claude CLI not found. Install from: https://docs.anthropic.com/en/docs/claude-code")
+        warnings.append(
+            "claude CLI not found. It is only needed for the manual /article, /youtube, /podcast and "
+            "/evaluate-knowledge skills; the scheduled pipeline does not use it. "
+            "Install from: https://docs.anthropic.com/en/docs/claude-code"
+        )
 
     if not shutil.which("yt-dlp"):
-        warnings.append("yt-dlp not found (needed for YouTube skill). Install: brew install yt-dlp")
-
-    if not shutil.which("npx"):
-        warnings.append("npx not found (needed for Obsidian MCP). Install Node.js: brew install node")
+        warnings.append("yt-dlp not found (needed for the manual /youtube skill). Install: brew install yt-dlp")
 
     return warnings
+
+
+def _check_melious(config: dict, resolve_key=resolve_api_key, make_client=MeliousClient) -> tuple[bool, str]:
+    """Check that a Melious key exists and that Melious accepts it and the model. Never prints the key."""
+    llm = config["llm"]
+    env_file = get_project_dir() / ".env"
+    try:
+        key = resolve_key(llm["keychain_service"], env_file)
+    except FatalRunError:
+        return False, (
+            "Melious API key not found. Add it in one of these ways:\n"
+            f"    - a line MELIOUS_API_KEY=... in {env_file}\n"
+            f"    - security add-generic-password -s {llm['keychain_service']} -a ai-research-assistant -w"
+        )
+
+    try:
+        make_client(llm, key).complete(
+            [{"role": "user", "content": 'Reply with the JSON object {"ok": true}.'}], max_tokens=20
+        )
+    except FatalRunError as e:
+        return False, str(e)
+    except LLMError as e:
+        return False, f"Could not reach Melious: {e}"
+    return True, f"Melious accepted the API key and model {llm['model']}."
 
 
 def _install_cron(config: dict) -> None:
@@ -286,6 +307,10 @@ def setup(install_schedule: bool):
             click.echo(f"  Warning: {w}")
     else:
         click.echo("  All dependencies found.")
+
+    click.echo("\nChecking Melious API key...")
+    ok, message = _check_melious(config)
+    click.echo(f"  {message}" if ok else f"  Warning: {message}")
 
     # Optional: install schedule
     if install_schedule:

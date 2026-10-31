@@ -25,7 +25,6 @@ __pycache__/
 config/user.yaml
 
 # Generated files (rendered from templates by setup wizard)
-config/mcp-minimal.json
 templates/com.claude.ai-research-assistant.plist
 skills/article/
 skills/youtube/

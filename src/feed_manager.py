@@ -2,20 +2,36 @@
 from pathlib import Path
 from datetime import datetime
 import hashlib
+import logging
 import xml.etree.ElementTree as ET
 
 import feedparser
+import httpx
 
+from src.config import load_config
 from src.database import Database
+from src.http_fetch import FetchError, fetch
 from src.models import Entry, Feed
+
+logger = logging.getLogger(__name__)
+MAX_FEED_BYTES = 20_000_000
+FEED_DEADLINE_SECONDS = 60
 
 
 class FeedManager:
     """Manages feed subscriptions and fetches new entries."""
 
-    def __init__(self, db: Database):
-        """Initialize with database connection."""
+    def __init__(self, db: Database, http_client: httpx.Client | None = None):
+        """Initialize with database connection and an optional HTTP client."""
         self.db = db
+        if http_client is None:
+            feeds_config = load_config()["feeds"]
+            http_client = httpx.Client(
+                timeout=feeds_config["request_timeout"],
+                headers={"User-Agent": feeds_config["user_agent"]},
+                follow_redirects=True,
+            )
+        self.http_client = http_client
 
     def add_feed(self, url: str, category: str | None = None) -> Feed:
         """Add a new feed subscription."""
@@ -81,7 +97,7 @@ class FeedManager:
                         entries.append(entry)
             except Exception as e:
                 # Log error but continue with other feeds
-                print(f"Error fetching {feed.url}: {e}")
+                logger.warning(f"Error fetching {feed.url}: {e}")
 
         return entries
 
@@ -95,14 +111,29 @@ class FeedManager:
     def _fetch_feed_title(self, url: str) -> str | None:
         """Fetch feed and extract title."""
         try:
-            parsed = feedparser.parse(url)
+            parsed = self._parse(url)
             return parsed.feed.get("title")
         except Exception:
             return None
 
+    def _parse(self, url: str) -> feedparser.FeedParserDict:
+        """Download a feed with the client's timeout and parse it."""
+        response = fetch(self.http_client, url, max_bytes=MAX_FEED_BYTES, deadline_seconds=FEED_DEADLINE_SECONDS)
+        if response.status != 200:
+            raise FetchError(f"HTTP {response.status}", permanent=False)
+        return feedparser.parse(response.content)
+
+    @staticmethod
+    def _item_content(item) -> str:
+        """Return the item's full content when present, else its summary."""
+        content = item.get("content")
+        if content and content[0].get("value"):
+            return content[0]["value"]
+        return item.get("summary", "")
+
     def _fetch_feed_entries(self, feed: Feed) -> list[Entry]:
         """Fetch entries from a single feed."""
-        parsed = feedparser.parse(feed.url)
+        parsed = self._parse(feed.url)
         entries = []
 
         for item in parsed.entries:
@@ -124,7 +155,7 @@ class FeedManager:
                     guid=guid,
                     title=item.get("title", "Untitled"),
                     url=item.get("link", ""),
-                    content=item.get("summary", ""),
+                    content=self._item_content(item),
                     author=item.get("author"),
                     published_at=published,
                     feed_id=feed.id,

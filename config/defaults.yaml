@@ -14,6 +14,7 @@ folders:
   daily_notes: "Daily Notes"
   clippings: "Clippings"
   templates: "Templates"
+  kb_fallback: "Misc"  # Knowledge-base subfolder used when the model names an unsafe folder
 
 # Interest profile
 profile:
@@ -26,6 +27,29 @@ processing:
   podcast_timeout: 600
   evaluate_batch_size: 6
   evaluate_timeout: 600
+  # Scheduled run limits
+  max_entry_age_days: 14  # New entries older than this are skipped
+  max_run_minutes: 60     # Stop starting new entries after this
+
+# LLM analysis (Melious, OpenAI-compatible API)
+llm:
+  base_url: "https://api.melious.ai/v1"
+  model: "deepseek-v4.1-flash"
+  keychain_service: "melious-api-key"  # Fallback when MELIOUS_API_KEY is not in env or .env
+  timeout_seconds: 180
+  max_retries: 2
+  max_output_tokens: 8000
+  reasoning_effort: null  # null = model default (reasoning on); "none" turns it off
+  output_language: "English"
+  price_input_per_mtok: 0.20         # EUR
+  price_cached_input_per_mtok: 0.01  # EUR
+  price_output_per_mtok: 1.00        # EUR
+  max_cost_per_run_eur: 2.00
+
+# Article extraction
+extraction:
+  min_words: 150    # Below this, an article counts as not extractable
+  max_words: 30000  # Longer text is cut before analysis
 
 # Retry settings
 retry:

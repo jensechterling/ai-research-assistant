@@ -56,7 +56,8 @@ class Database:
         items_fetched INTEGER DEFAULT 0,
         items_processed INTEGER DEFAULT 0,
         items_failed INTEGER DEFAULT 0,
-        status TEXT CHECK (status IN ('running', 'completed', 'failed'))
+        status TEXT CHECK (status IN ('running', 'completed', 'failed')),
+        error TEXT
     );
 
     -- Indexes for common queries
@@ -76,6 +77,10 @@ class Database:
     def _init_schema(self) -> None:
         """Create tables if they don't exist."""
         self.conn.executescript(self.SCHEMA)
+        # Databases created before the error column existed
+        columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(pipeline_runs)")}
+        if "error" not in columns:
+            self.conn.execute("ALTER TABLE pipeline_runs ADD COLUMN error TEXT")
         self.conn.commit()
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -148,6 +153,20 @@ class Database:
         )
         self.commit()
 
+    def record_run_failed(self, run_id: int, processed: int, failed: int, error: str) -> None:
+        """Mark pipeline run as failed with stats and the cause."""
+        self.execute(
+            """UPDATE pipeline_runs
+               SET completed_at = CURRENT_TIMESTAMP,
+                   items_processed = ?,
+                   items_failed = ?,
+                   status = ?,
+                   error = ?
+               WHERE id = ?""",
+            (processed, failed, "failed", error, run_id),
+        )
+        self.commit()
+
     def get_last_successful_run(self) -> datetime | None:
         """Get timestamp of last completed pipeline run."""
         cursor = self.execute(
@@ -171,8 +190,11 @@ class Database:
         entry_title: str | None,
         category: str,
         error: str,
-    ) -> None:
-        """Add failed entry to retry queue with exponential backoff."""
+    ) -> bool:
+        """Add failed entry to retry queue with exponential backoff.
+
+        Returns False when the entry has used up its attempts and was dropped.
+        """
         # Check if already in retry queue
         existing = self.execute(
             "SELECT retry_count FROM retry_queue WHERE entry_guid = ?",
@@ -185,7 +207,7 @@ class Database:
                 # Give up - remove from queue
                 self.execute("DELETE FROM retry_queue WHERE entry_guid = ?", (entry_guid,))
                 self.commit()
-                return
+                return False
             backoff = self.BACKOFF_HOURS[retry_count]
             self.execute(
                 """UPDATE retry_queue
@@ -207,6 +229,11 @@ class Database:
                 (entry_guid, feed_id, entry_url, entry_title, category, backoff, error),
             )
         self.commit()
+        return True
+
+    def get_queued_guids(self) -> set[str]:
+        """Return the guids of every entry in the retry queue, due or not."""
+        return {row["entry_guid"] for row in self.execute("SELECT entry_guid FROM retry_queue")}
 
     def get_retry_candidates(self) -> list[sqlite3.Row]:
         """Get entries due for retry (next_retry_at <= now).
