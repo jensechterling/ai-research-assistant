@@ -96,3 +96,32 @@ def test_defaults_yaml_is_valid():
     assert "retry" in config
     assert "feeds" in config
     assert config["vault"]["path"] is None  # Must be set by user
+
+
+def test_defaults_include_llm_settings():
+    """Defaults should point at Melious with DeepSeek Flash and set run limits."""
+    config = load_config()
+    assert config["llm"]["base_url"] == "https://api.melious.ai/v1"
+    assert config["llm"]["model"] == "deepseek-v4.1-flash"
+    assert config["llm"]["keychain_service"] == "melious-api-key"
+    assert config["llm"]["reasoning_effort"] is None
+    assert config["llm"]["max_cost_per_run_eur"] == 2.0
+    assert config["extraction"] == {"min_words": 150, "max_words": 30000}
+    assert config["processing"]["max_entry_age_days"] == 14
+    assert config["processing"]["max_run_minutes"] == 60
+    assert config["folders"]["kb_fallback"] == "Misc"
+
+
+def test_user_yaml_overrides_llm_model(tmp_path, monkeypatch):
+    """A user.yaml overriding llm.model should keep the other llm defaults."""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    defaults = get_project_dir() / "config" / "defaults.yaml"
+    (config_dir / "defaults.yaml").write_text(defaults.read_text())
+    (config_dir / "user.yaml").write_text(yaml.safe_dump({"llm": {"model": "other-model"}}))
+    monkeypatch.setattr("src.config._get_project_dir", lambda: tmp_path)
+
+    config = load_config()
+
+    assert config["llm"]["model"] == "other-model"
+    assert config["llm"]["base_url"] == "https://api.melious.ai/v1"

@@ -1,4 +1,10 @@
-## ADDED Requirements
+# permanent-failure-detection Specification
+
+## Purpose
+
+Keeps entries that can never be processed (paywalls, missing transcripts) out of the retry queue and reports them separately from transient failures.
+
+## Requirements
 
 ### Requirement: Detect permanent failures from skill output
 When a skill completes without producing a note path, the system SHALL check the skill's stdout against a list of known permanent failure patterns (case-insensitive). If any pattern matches, the failure SHALL be classified as permanent.

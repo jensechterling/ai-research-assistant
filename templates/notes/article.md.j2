@@ -1,0 +1,41 @@
+# {{ article.title }}
+
+## Metadata
+- **Source:** {{ article.site }}
+{%- if article.author %}
+- **Author:** {{ article.author }}
+{%- endif %}
+{%- if article.published %}
+- **Published:** {{ article.published }}
+{%- endif %}
+- **URL:** {{ article.url }}
+{%- if article.from_feed %}
+- **Note:** Text taken from the feed; the page itself could not be read.
+{%- endif %}
+{%- if article.truncated %}
+- **Note:** Original text truncated at {{ article.word_count }} words.
+{%- endif %}
+
+## Management Summary
+
+{{ analysis.summary }}
+
+## Key Findings
+
+{% for finding in analysis.key_findings -%}
+- {{ finding }}
+{% endfor %}
+## Suggestions
+
+### For Work
+{% for item in analysis.suggestions_work -%}
+- {{ item }}
+{% endfor %}
+### For Personal Life
+{% for item in analysis.suggestions_personal -%}
+- {{ item }}
+{% endfor %}
+## Original Content
+
+> [!info]- Full Article Text
+{{ callout }}

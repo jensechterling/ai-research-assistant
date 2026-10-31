@@ -22,6 +22,16 @@ def cli():
 # === Pipeline Commands ===
 
 
+def configure_logging() -> None:
+    """Log pipeline progress at INFO; keep per-request HTTP client logs out of the run log."""
+    import logging
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logging.getLogger().setLevel(logging.INFO)
+    for name in ("httpx", "httpx2", "openai"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 @cli.command()
 @click.option("--dry-run", is_flag=True, help="Show what would be processed without doing it")
 @click.option("--limit", "-n", type=int, default=None, help="Limit number of items to process")
@@ -29,11 +39,9 @@ def cli():
 @click.option("--force", is_flag=True, help="Override pipeline lock if another run is in progress")
 def run(dry_run: bool, limit: int | None, verbose: bool, force: bool):
     """Run the content pipeline."""
-    import logging
-
     from src.pipeline import PipelineLockError, run_pipeline
 
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    configure_logging()
 
     db = get_db()
     try:
@@ -42,11 +50,24 @@ def run(dry_run: bool, limit: int | None, verbose: bool, force: bool):
         click.echo(f"Error: {e}", err=True)
         raise SystemExit(1)
 
-    click.echo(f"Processed: {result.processed}, Failed: {result.failed}")
+    if result.dry_run:
+        click.echo(
+            f"Would process: {result.skipped} (skipped: {result.stale} stale, "
+            f"{result.unsupported} unsupported category)"
+        )
+        return
+
+    click.echo(
+        f"Processed: {result.processed}, Failed: {result.failed}, "
+        f"Skipped (not extractable): {result.permanent_failures}, Cost: EUR {result.cost_eur:.4f}"
+    )
     if result.retried:
         click.echo(f"Retried: {result.retried}")
-    if result.skipped:
-        click.echo(f"Skipped (dry run): {result.skipped}")
+    if result.limit_reason:
+        click.echo(f"Stopped early: {result.limit_reason}")
+    if result.stopped_reason:
+        click.echo(f"Run stopped: {result.stopped_reason}", err=True)
+        raise SystemExit(1)
 
 
 @cli.command()

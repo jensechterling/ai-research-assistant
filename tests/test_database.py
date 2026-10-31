@@ -141,3 +141,76 @@ def test_add_to_retry_queue_and_get_candidates():
         candidates = db.get_retry_candidates()
         assert len(candidates) == 1
         assert candidates[0]["entry_guid"] == "guid-456"
+
+
+def test_record_run_failed_stores_status_counts_and_error():
+    """A stopped run should be recorded as failed with its cause."""
+    from src.database import Database
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = Database(Path(tmpdir) / "test.db")
+        run_id = db.record_run_start()
+
+        db.record_run_failed(run_id, processed=2, failed=0, error="Melious API rejected the request (HTTP 401)")
+
+        row = db.execute("SELECT * FROM pipeline_runs WHERE id = ?", (run_id,)).fetchone()
+        assert row["status"] == "failed"
+        assert row["completed_at"] is not None
+        assert row["items_processed"] == 2
+        assert row["error"] == "Melious API rejected the request (HTTP 401)"
+        assert db.get_last_successful_run() is None
+
+
+def test_error_column_added_to_existing_database():
+    """Opening a database created before the error column existed should add it."""
+    import sqlite3
+
+    from src.database import Database
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "old.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "CREATE TABLE pipeline_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TIMESTAMP, "
+            "completed_at TIMESTAMP, items_fetched INTEGER DEFAULT 0, items_processed INTEGER DEFAULT 0, "
+            "items_failed INTEGER DEFAULT 0, status TEXT)"
+        )
+        conn.commit()
+        conn.close()
+
+        db = Database(db_path)
+
+        columns = [r["name"] for r in db.execute("PRAGMA table_info(pipeline_runs)").fetchall()]
+        assert "error" in columns
+
+
+def _queue(db, guid="g1"):
+    return db.add_to_retry_queue(
+        entry_guid=guid, feed_id=1, entry_url="https://x", entry_title="t", category="articles", error="e"
+    )
+
+
+def test_add_to_retry_queue_reports_when_it_gives_up():
+    """add_to_retry_queue should return False once the entry is dropped after the last attempt."""
+    from src.database import Database
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = Database(Path(tmpdir) / "test.db")
+        # First failure plus one retry per backoff step; the next failure gives up
+        results = [_queue(db) for _ in range(len(Database.BACKOFF_HOURS) + 1)]
+
+        assert results == [True, True, True, True, False]
+        assert db.get_queued_guids() == set()
+
+
+def test_get_queued_guids_includes_entries_not_yet_due():
+    """Every queued guid should be returned, due or not."""
+    from src.database import Database
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = Database(Path(tmpdir) / "test.db")
+        _queue(db, "g1")
+        _queue(db, "g2")
+
+        assert db.get_queued_guids() == {"g1", "g2"}
+        assert db.get_retry_candidates() == []

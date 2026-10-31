@@ -1,0 +1,16 @@
+Analyse this article.
+
+- Title: {{ article.title }}
+- Author: {{ article.author or "unknown" }}
+- Published: {{ article.published or "unknown" }}
+- Source: {{ article.site }}
+{%- if article.from_feed %}
+- Note: text taken from the feed, the page itself could not be read
+{%- endif %}
+{%- if article.truncated %}
+- Note: the text below was cut at {{ article.word_count }} words
+{%- endif %}
+
+---
+
+{{ article.text }}

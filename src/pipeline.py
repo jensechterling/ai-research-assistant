@@ -3,16 +3,28 @@ import fcntl
 import logging
 import os
 import subprocess
+import time
+from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
+import httpx
+
+from src.analysis import load_context
+from src.config import get_project_dir, get_vault_path, load_config
 from src.database import Database
 from src.feed_manager import FeedManager
+from src.llm import FatalRunError, MeliousClient, resolve_api_key
 from src.models import Entry
-from src.skill_runner import SkillRunner
+from src.processor import EntryProcessor
 
 logger = logging.getLogger(__name__)
+
+SUPPORTED_CATEGORY = "articles"
+ANALYSIS_FAILURES_TO_STOP = 3  # analysis failures in a row, before any analysis worked, that stop a run
+NOTIFICATION_TITLE = "Content Pipeline"
 
 LOCK_PATH = Path(__file__).parent.parent / "data" / "pipeline.lock"
 
@@ -82,13 +94,50 @@ class PipelineResult:
     processed: int = 0
     failed: int = 0
     retried: int = 0
-    skipped: int = 0
+    skipped: int = 0  # entries listed by a dry run
     permanent_failures: int = 0
+    stale: int = 0
+    unsupported: int = 0
+    cost_eur: float = 0.0
+    stopped_reason: str | None = None  # set when a fatal error stopped the run
+    limit_reason: str | None = None  # set when the time or cost limit was reached
+    dry_run: bool = False
     created_notes: list[Path] = field(default_factory=list)
     failures: list[tuple[Entry, str]] = field(default_factory=list)
 
 
-def run_pipeline(db: Database, dry_run: bool = False, limit: int | None = None, verbose: bool = False, force: bool = False) -> PipelineResult:
+def build_processor(config: dict, today: date) -> EntryProcessor:
+    """Check the vault, profile and API key, then build the per-entry processor."""
+    try:
+        vault = get_vault_path(config)
+    except ValueError as e:
+        raise FatalRunError(str(e)) from None
+    if not vault.is_dir():
+        raise FatalRunError(f"Vault folder not found: {vault}")
+    context = load_context(config, vault, today)
+    key = resolve_api_key(config["llm"]["keychain_service"], get_project_dir() / ".env")
+    http_client = httpx.Client(
+        timeout=config["feeds"]["request_timeout"],
+        headers={"User-Agent": config["feeds"]["user_agent"]},
+        follow_redirects=True,
+    )
+    return EntryProcessor(config, vault, context, MeliousClient(config["llm"], key), http_client, today)
+
+
+def run_pipeline(
+    db: Database,
+    dry_run: bool = False,
+    limit: int | None = None,
+    verbose: bool = False,
+    force: bool = False,
+    *,
+    config: dict | None = None,
+    feed_manager=None,
+    processor_factory: Callable[[dict, date], EntryProcessor] = build_processor,
+    now: datetime | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    notify: Callable[[PipelineResult], None] | None = None,
+) -> PipelineResult:
     """Execute the content pipeline."""
     # Acquire lock (skip for dry-run)
     lock = None
@@ -104,23 +153,32 @@ def run_pipeline(db: Database, dry_run: bool = False, limit: int | None = None, 
             lock.acquire()
 
     try:
-        return _run_pipeline_inner(db, dry_run, limit, verbose)
+        return _run_pipeline_inner(
+            db, dry_run, limit, verbose,
+            config=config if config is not None else load_config(),
+            feed_manager=feed_manager if feed_manager is not None else FeedManager(db),
+            processor_factory=processor_factory,
+            now=now or datetime.now(),
+            clock=clock,
+            notify=notify or send_notification,
+        )
     finally:
         if lock is not None:
             lock.release()
 
 
-def _run_pipeline_inner(db: Database, dry_run: bool, limit: int | None, verbose: bool) -> PipelineResult:
+def _run_pipeline_inner(db: Database, dry_run: bool, limit: int | None, verbose: bool, *, config: dict,
+                        feed_manager, processor_factory, now: datetime, clock, notify) -> PipelineResult:
     """Inner pipeline logic (called with lock held)."""
-    feed_manager = FeedManager(db)
-    skill_runner = SkillRunner()
+    result = PipelineResult(dry_run=dry_run)
 
-    # Validate required skills are installed
-    missing_skills = skill_runner.validate_skills()
-    if missing_skills:
-        logger.error(f"Missing required skills: {', '.join(missing_skills)}")
-        logger.error("Run 'ai-research-assistant setup' to install skills")
-        return PipelineResult()
+    if dry_run:
+        entries, retry_guids = _select_entries(db, feed_manager, config, now, limit, result)
+        for entry in entries:
+            marker = " [retry]" if entry.guid in retry_guids else ""
+            logger.info(f"[DRY RUN] Would process: {entry.title}{marker}")
+        result.skipped = len(entries)
+        return result
 
     # Check for catch-up (missed runs)
     last_run = db.get_last_successful_run()
@@ -129,193 +187,193 @@ def _run_pipeline_inner(db: Database, dry_run: bool, limit: int | None, verbose:
         if hours_since > 36:
             logger.warning(f"Catch-up mode: {hours_since:.1f} hours since last run")
 
-    # Start pipeline run
     run_id = db.record_run_start()
+    try:
+        processor = processor_factory(config, now.date())
+        entries, retry_guids = _select_entries(db, feed_manager, config, now, limit, result)
+        _process_entries(db, processor, entries, retry_guids, config, clock, verbose, result)
+    except FatalRunError as e:
+        result.stopped_reason = str(e)
+        logger.error(f"Run stopped: {e}")
+        db.record_run_failed(run_id, result.processed, result.failed, str(e))
+        notify(result)
+        return result
+    except BaseException as e:
+        result.stopped_reason = f"{type(e).__name__}: {e}"
+        db.record_run_failed(run_id, result.processed, result.failed, result.stopped_reason)
+        if isinstance(e, Exception):
+            notify(result)
+        raise
 
-    # Fetch new entries + retry candidates
-    new_entries = feed_manager.fetch_new_entries()
-    retry_rows = db.get_retry_candidates()
-
-    # Convert retry rows to Entry objects
-    retry_entries = []
-    for row in retry_rows:
-        retry_entries.append(
-            Entry(
-                guid=row["entry_guid"],
-                title=row["entry_title"] or "Untitled",
-                url=row["entry_url"],
-                content="",
-                author=None,
-                published_at=None,
-                feed_id=row["feed_id"],
-                feed_title="",
-                category=row["category"],
-            )
-        )
-
-    all_entries = new_entries + retry_entries
-
-    # Apply limit if specified
-    if limit is not None and limit < len(all_entries):
-        all_entries = all_entries[:limit]
-        logger.info(f"Found {len(new_entries)} new entries, {len(retry_entries)} retries (limited to {limit})")
-    else:
-        logger.info(f"Found {len(new_entries)} new entries, {len(retry_entries)} retries")
-
-    if dry_run:
-        for entry in all_entries:
-            logger.info(f"[DRY RUN] Would process: {entry.title} ({entry.category})")
-        return PipelineResult(skipped=len(all_entries))
-
-    # Process entries sequentially
-    result = PipelineResult()
-    total = len(all_entries)
-
-    for idx, entry in enumerate(all_entries, 1):
-        is_retry = entry in retry_entries
-
-        if verbose:
-            retry_marker = " [retry]" if is_retry else ""
-            logger.info(f"[{idx}/{total}] Processing: {entry.title}{retry_marker}")
-
-        try:
-            # Skip if already processed (clears zombie retries)
-            if db.is_processed(entry.guid):
-                if is_retry:
-                    db.remove_from_retry_queue(entry.guid)
-                    if verbose:
-                        logger.info("    Already processed, removed from retry queue")
-                continue
-
-            skill_result = skill_runner.run_skill(entry)
-
-            if skill_result.success:
-                # Mark as processed
-                db.mark_processed(
-                    entry_guid=entry.guid,
-                    feed_id=entry.feed_id,
-                    entry_url=entry.url,
-                    entry_title=entry.title,
-                    note_path=skill_result.note_path,
-                )
-
-                # Remove from retry queue if it was a retry
-                if is_retry:
-                    db.remove_from_retry_queue(entry.guid)
-                    result.retried += 1
-
-                result.created_notes.append(skill_result.note_path)
-                result.processed += 1
-                if verbose:
-                    logger.info(f"    ✓ Created: {skill_result.note_path.name}")
-            else:
-                error_msg = skill_result.error or "Unknown error"
-                if skill_result.permanent:
-                    # Permanent failure — skip retry queue
-                    result.permanent_failures += 1
-                    logger.warning(f"[PERMANENT] {entry.title}: {error_msg}")
-                else:
-                    # Transient failure — add to retry queue
-                    db.add_to_retry_queue(
-                        entry_guid=entry.guid,
-                        feed_id=entry.feed_id,
-                        entry_url=entry.url,
-                        entry_title=entry.title,
-                        category=entry.category,
-                        error=error_msg,
-                    )
-                    result.failed += 1
-                    result.failures.append((entry, error_msg))
-                    if verbose:
-                        logger.error(f"    ✗ {error_msg}")
-
-        except Exception as e:
-            db.add_to_retry_queue(
-                entry_guid=entry.guid,
-                feed_id=entry.feed_id,
-                entry_url=entry.url,
-                entry_title=entry.title,
-                category=entry.category,
-                error=str(e),
-            )
-            result.failed += 1
-            result.failures.append((entry, str(e)))
-            if verbose:
-                logger.error(f"    ✗ Exception: {e}")
-
-    # Post-process with /evaluate-knowledge in batches
-    if result.created_notes:
-        vault_path = skill_runner.vault_path
-        relative_paths = []
-        for p in result.created_notes:
-            try:
-                rel = p.relative_to(vault_path)
-                relative_paths.append(str(rel))
-            except ValueError:
-                relative_paths.append(str(p))
-
-        batch_size = 6
-        batches = [relative_paths[i : i + batch_size] for i in range(0, len(relative_paths), batch_size)]
-        logger.info(
-            f"Running /evaluate-knowledge on {len(relative_paths)} new notes "
-            f"({len(batches)} batch{'es' if len(batches) != 1 else ''} of up to {batch_size})"
-        )
-
-        for batch_idx, batch in enumerate(batches, 1):
-            file_list = " ".join(f'"{p}"' for p in batch)
-            try:
-                subprocess.run(
-                    [
-                        "claude",
-                        "--print",
-                        "--dangerously-skip-permissions",
-                        f"/evaluate-knowledge {file_list}",
-                    ],
-                    timeout=600,
-                    capture_output=True,
-                )
-                logger.info(f"    Batch {batch_idx}/{len(batches)} done ({len(batch)} notes)")
-            except subprocess.TimeoutExpired:
-                logger.warning(f"    Batch {batch_idx}/{len(batches)} timed out after 600s, continuing")
-            except Exception as e:
-                logger.warning(f"    Batch {batch_idx}/{len(batches)} failed: {e}, continuing")
-
-    # Record run completion
     db.record_run_complete(run_id, result.processed, result.failed)
-
-    # Send notification
-    send_notification(result)
-
+    logger.info(
+        f"Done: {result.processed} processed, {result.failed} failed, "
+        f"{result.permanent_failures} skipped (not extractable), {result.retried} retried, "
+        f"EUR {result.cost_eur:.4f}"
+    )
+    notify(result)
     return result
 
 
+def _select_entries(db: Database, feed_manager, config: dict, now: datetime, limit: int | None,
+                    result: PipelineResult) -> tuple[list[Entry], set[str]]:
+    """Merge new and due retry entries, drop unsupported, waiting and stale ones, apply the limit."""
+    new_entries = feed_manager.fetch_new_entries()
+    retry_rows = db.get_retry_candidates()
+    queued = db.get_queued_guids()
+    due_guids = {row["entry_guid"] for row in retry_rows}
+
+    unsupported = Counter()
+    entries: list[Entry] = []
+    seen: set[str] = set()
+    for entry in new_entries:
+        if entry.category != SUPPORTED_CATEGORY:
+            unsupported[(entry.feed_title or str(entry.feed_id), entry.category)] += 1
+            continue
+        if entry.guid in queued and entry.guid not in due_guids:
+            continue  # waiting for its retry time
+        entries.append(entry)
+        seen.add(entry.guid)
+
+    for row in retry_rows:
+        if row["entry_guid"] in seen:
+            continue  # the feed copy is used: it has content and a date
+        if row["category"] != SUPPORTED_CATEGORY:
+            unsupported[(f"feed {row['feed_id']}", row["category"])] += 1
+            continue
+        entries.append(Entry(
+            guid=row["entry_guid"], title=row["entry_title"] or "Untitled", url=row["entry_url"], content="",
+            author=None, published_at=None, feed_id=row["feed_id"], feed_title="", category=row["category"],
+        ))
+
+    for (feed, category), count in unsupported.items():
+        logger.info(f"Skipped {count} {category} entries from {feed}: use the manual /{category.rstrip('s')} skill")
+    result.unsupported = sum(unsupported.values())
+
+    cutoff = now - timedelta(days=config["processing"]["max_entry_age_days"])
+    fresh = [
+        e for e in entries
+        if e.guid in due_guids or e.published_at is None or e.published_at >= cutoff
+    ]
+    result.stale = len(entries) - len(fresh)
+    if result.stale:
+        logger.info(f"Skipped {result.stale} stale entries (older than {config['processing']['max_entry_age_days']} days)")
+
+    retries = sum(1 for e in fresh if e.guid in due_guids)
+    logger.info(f"Found {len(fresh) - retries} new entries, {retries} retries")
+    if limit is not None and limit < len(fresh):
+        fresh = fresh[:limit]
+        logger.info(f"Limited to {limit}")
+    return fresh, due_guids
+
+
+def _process_entries(db: Database, processor, entries: list[Entry], retry_guids: set[str], config: dict,
+                     clock, verbose: bool, result: PipelineResult) -> None:
+    max_seconds = config["processing"]["max_run_minutes"] * 60
+    max_cost = config["llm"]["max_cost_per_run_eur"]
+    start = clock()
+    total = len(entries)
+    analysis_worked = False
+    analysis_failures = 0
+
+    for idx, entry in enumerate(entries, 1):
+        if clock() - start >= max_seconds:
+            result.limit_reason = f"time limit of {config['processing']['max_run_minutes']} minutes reached"
+        elif result.cost_eur >= max_cost:
+            result.limit_reason = f"cost limit of EUR {max_cost:.2f} reached"
+        if result.limit_reason:
+            logger.warning(f"Stopping early: {result.limit_reason}; {total - idx + 1} entries left for the next run")
+            return
+
+        is_retry = entry.guid in retry_guids
+        if verbose:
+            logger.info(f"[{idx}/{total}] Processing: {entry.title}{' [retry]' if is_retry else ''}")
+
+        # Skip if already processed (clears zombie retries)
+        if db.is_processed(entry.guid):
+            if is_retry:
+                db.remove_from_retry_queue(entry.guid)
+            continue
+
+        try:
+            outcome = processor.process(entry)
+        except FatalRunError:
+            raise
+        except Exception as e:
+            outcome = None
+            error = f"unexpected: {type(e).__name__}: {e}"
+        else:
+            error = outcome.error or "Unknown error"
+            result.cost_eur += outcome.cost_eur
+
+        if outcome is not None and (outcome.success or outcome.step == "vault"):
+            analysis_worked = True
+
+        if outcome is not None and outcome.success:
+            db.mark_processed(entry.guid, entry.feed_id, entry.url, entry.title, outcome.note_path)
+            if is_retry:
+                db.remove_from_retry_queue(entry.guid)
+                result.retried += 1
+            result.created_notes.append(outcome.note_path)
+            result.processed += 1
+            if verbose:
+                logger.info(f"    ✓ Created: {outcome.note_path.name} (EUR {outcome.cost_eur:.4f})")
+        elif outcome is not None and outcome.permanent:
+            db.mark_processed(entry.guid, entry.feed_id, entry.url, entry.title, None)
+            if is_retry:
+                db.remove_from_retry_queue(entry.guid)
+            result.permanent_failures += 1
+            logger.warning(f"[PERMANENT] {entry.title}: {error}")
+        else:
+            still_queued = db.add_to_retry_queue(
+                entry_guid=entry.guid, feed_id=entry.feed_id, entry_url=entry.url,
+                entry_title=entry.title, category=entry.category, error=error,
+            )
+            if not still_queued:
+                db.mark_processed(entry.guid, entry.feed_id, entry.url, entry.title, None)
+                logger.warning(f"[GAVE UP] {entry.title}: no attempts left, last error: {error}")
+            result.failed += 1
+            result.failures.append((entry, error))
+            if verbose:
+                logger.error(f"    ✗ {error}")
+
+            # Analysis failing for every entry points at the API or the config, not the articles:
+            # stop instead of spending every entry's retry attempts on it.
+            if outcome is not None and outcome.step == "analysis" and not analysis_worked:
+                analysis_failures += 1
+                if analysis_failures >= ANALYSIS_FAILURES_TO_STOP:
+                    raise FatalRunError(
+                        f"{analysis_failures} analyses failed in a row at the start of the run; last error: {error}"
+                    )
+
+
+def notification_text(result: PipelineResult) -> tuple[str, str]:
+    """Return (title, message) for the end-of-run notification."""
+    if result.stopped_reason:
+        return "Run stopped", result.stopped_reason[:150]
+    parts = [f"Processed {result.processed}"]
+    if result.failed:
+        parts.append(f"Failed {result.failed}")
+    if result.permanent_failures:
+        parts.append(f"{result.permanent_failures} skipped (not extractable)")
+    if result.retried:
+        parts.append(f"{result.retried} retried")
+    parts.append(f"EUR {result.cost_eur:.2f}")
+    return NOTIFICATION_TITLE, ", ".join(parts)
+
+
 def send_notification(result: PipelineResult) -> None:
-    """Send macOS notification with pipeline results."""
-    title = "Content Pipeline"
-
-    if result.skipped > 0:
-        message = f"Dry run: {result.skipped} items previewed"
-    elif result.processed == 0 and result.failed == 0 and result.permanent_failures == 0:
-        message = "No items to process"
-    elif result.failed > 0:
-        message = f"Processed {result.processed}, Failed {result.failed}"
-        if result.permanent_failures > 0:
-            message += f", {result.permanent_failures} skipped (paywall)"
-        first_fail = result.failures[0]
-        message += f"\nFirst failure: {first_fail[0].title[:30]}..."
-    else:
-        message = f"Processed {result.processed} items"
-        if result.retried > 0:
-            message += f" ({result.retried} retried)"
-        if result.permanent_failures > 0:
-            message += f", {result.permanent_failures} skipped (paywall)"
-
+    """Show a macOS notification; text is passed as arguments so quotes cannot break it."""
+    title, message = notification_text(result)
     try:
         subprocess.run(
             [
                 "osascript",
-                "-e",
-                f'display notification "{message}" with title "{title}"',
+                "-e", "on run argv",
+                "-e", "display notification (item 1 of argv) with title (item 2 of argv)",
+                "-e", "end run",
+                message,
+                title,
             ],
             capture_output=True,
         )

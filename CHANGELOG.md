@@ -4,6 +4,45 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+The scheduled pipeline no longer runs Claude Code. It extracts articles in Python and analyzes each one with a single call to Melious.
+
+### Added
+
+- **Melious analysis** — one JSON-mode request per article to `deepseek-v4.1-flash`, validated against a schema, with one repair request for invalid replies and a retry with a larger token budget for cut-off replies
+- **Article extraction** — trafilatura on the downloaded page, falling back to the feed's full text, which is now stored for each entry
+- **Direct filing** — notes go straight into the best-fitting knowledge-base folder, with a Daily Dose entry and an evaluation-log row
+- **Run limits** — stale-entry filter (14 days), run time limit (60 minutes) and cost ceiling (EUR 2.00), with cost per article and per run in the log and notification
+- **Setup key check** — setup tests the Melious key and model with one small request
+- **`scripts/probe_melious.py`** — records Melious API behaviour
+
+### Changed
+
+- **BREAKING:** the scheduled pipeline processes `articles` feeds only; YouTube and podcast feeds are skipped (the manual skills still handle them)
+- **BREAKING:** a Melious API key is required (`MELIOUS_API_KEY` in `.env`, or the Keychain)
+- Permanent failures are decided by the extraction step (HTTP status, word count) instead of phrases in skill output, and are recorded so they are not tried again
+- Account-level API errors and a missing profile stop the run instead of failing every entry
+- Three analysis failures in a row at the start of a run stop it, so an outage or config error does not use up every entry's retry attempts
+- An unexpected crash shows a "Run stopped" notification
+- The notification passes its text to `osascript` as arguments
+- The Monday OPML backup moved to `scripts/backup_feeds.sh` and only commits and pushes on `master`
+
+### Fixed
+
+- An entry that was both new and in the retry queue was processed twice per run
+- Entries still in their feed ignored their retry backoff and were attempted every run
+- Entries dropped by the retry queue came back as new and started over
+- Failed runs were recorded as completed
+- Feed downloads had no timeout
+- Downloads could hang a run when a server sent data very slowly: feeds and pages now have a total deadline and a size cap, and links to PDFs or other non-HTML files are not read as pages
+- A `|` or `]]` in a title broke the evaluation-log table and the note link
+- Templater commands (`<%`) in article or model text are neutralised before they reach the vault
+- Rewritten vault files kept the temporary file's owner-only permissions
+
+### Removed
+
+- `src/skill_runner.py` and the headless `/evaluate-knowledge` post-step
+- `config/mcp-minimal.json` and the `npx` dependency check
+
 ## [0.3.0] - 2026-02-10
 
 Repository made public and hardened for open-source visibility.

@@ -5,6 +5,11 @@ from unittest.mock import MagicMock
 
 from src.pipeline import PipelineLock, PipelineLockError
 
+CONFIG = {
+    "processing": {"max_entry_age_days": 14, "max_run_minutes": 60},
+    "llm": {"max_cost_per_run_eur": 2.0},
+}
+
 
 def test_lock_acquired_and_pid_written(tmp_path):
     """Lock file is created with current PID."""
@@ -60,12 +65,12 @@ def test_dry_run_does_not_acquire_lock(tmp_path, monkeypatch):
     db.get_last_successful_run.return_value = None
     db.get_retry_candidates.return_value = []
 
+    db.get_queued_guids.return_value = set()
+
     feed_manager_mock = MagicMock()
     feed_manager_mock.fetch_new_entries.return_value = []
-    monkeypatch.setattr("src.pipeline.FeedManager", lambda _db: feed_manager_mock)
-    monkeypatch.setattr("src.pipeline.SkillRunner", MagicMock)
 
-    run_pipeline(db, dry_run=True)
+    run_pipeline(db, dry_run=True, config=CONFIG, feed_manager=feed_manager_mock)
 
     # Lock file should not have been opened with flock
     if lock_path.exists():
@@ -97,16 +102,16 @@ def test_force_bypasses_lock_with_warning(tmp_path, monkeypatch, caplog):
     db.get_retry_candidates.return_value = []
     db.record_run_start.return_value = 1
 
+    db.get_queued_guids.return_value = set()
+
     feed_manager_mock = MagicMock()
     feed_manager_mock.fetch_new_entries.return_value = []
-    monkeypatch.setattr("src.pipeline.FeedManager", lambda _db: feed_manager_mock)
-
-    skill_runner_mock = MagicMock()
-    skill_runner_mock.validate_skills.return_value = []
-    monkeypatch.setattr("src.pipeline.SkillRunner", lambda: skill_runner_mock)
 
     with caplog.at_level(logging.WARNING, logger="src.pipeline"):
-        result = run_pipeline(db, dry_run=False, force=True)
+        result = run_pipeline(
+            db, dry_run=False, force=True, config=CONFIG, feed_manager=feed_manager_mock,
+            processor_factory=lambda config, today: MagicMock(), notify=lambda result: None,
+        )
 
     assert result.processed == 0
     assert "Force override" in caplog.text

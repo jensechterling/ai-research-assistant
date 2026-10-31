@@ -100,7 +100,7 @@ def test_rendered_skills_contain_configured_folders():
 
 
 def test_infra_templates_render_without_error():
-    """Infrastructure templates (mcp, run.sh, plist) should render with defaults."""
+    """Infrastructure templates (plist) should render with defaults."""
     project_dir = get_project_dir()
     template_vars = _default_template_vars()
 
@@ -110,7 +110,6 @@ def test_infra_templates_render_without_error():
     )
 
     infra_templates = [
-        "mcp-minimal.json.j2",
         "com.claude.ai-research-assistant.plist.j2",
     ]
 
@@ -120,20 +119,23 @@ def test_infra_templates_render_without_error():
         assert len(rendered) > 0, f"Rendered {name} is empty"
 
 
-def test_mcp_template_contains_vault_path():
-    """Rendered MCP config should contain the configured vault path."""
+def test_render_templates_writes_plist_but_no_mcp_config(tmp_path, monkeypatch):
+    """Setup renders the launchd plist and no longer creates config/mcp-minimal.json."""
+    import shutil
+
+    from src.setup import _render_templates
+
     project_dir = get_project_dir()
-    template_vars = _default_template_vars()
-    template_vars["vault_path"] = "/Users/someone/Obsidian/Vault"
+    shutil.copytree(project_dir / "skills" / "_templates", tmp_path / "skills" / "_templates")
+    shutil.copytree(project_dir / "templates", tmp_path / "templates")
+    (tmp_path / "config").mkdir()
+    monkeypatch.setattr("src.setup.get_project_dir", lambda: tmp_path)
 
-    env = Environment(
-        loader=FileSystemLoader(str(project_dir / "templates")),
-        keep_trailing_newline=True,
-    )
-    template = env.get_template("mcp-minimal.json.j2")
-    rendered = template.render(**template_vars)
+    _render_templates(load_config() | {"vault": {"path": "/Users/someone/Vault"}})
 
-    assert "/Users/someone/Obsidian/Vault" in rendered
+    assert not (tmp_path / "config" / "mcp-minimal.json").exists()
+    plist = (tmp_path / "templates" / "com.claude.ai-research-assistant.plist").read_text()
+    assert str(tmp_path) in plist
 
 
 def test_rendered_skills_contain_no_personal_references():
@@ -162,15 +164,17 @@ def test_rendered_skills_contain_no_personal_references():
                     )
 
 
-def test_check_dependencies_returns_warnings_for_missing():
-    """_check_dependencies should return warnings for missing tools."""
+def test_check_dependencies_warns_for_manual_skill_tools_only():
+    """Missing claude and yt-dlp are warnings about manual skills; npx is not checked."""
     with patch("shutil.which", return_value=None):
         warnings = _check_dependencies()
 
-    assert len(warnings) == 3
-    assert any("claude" in w for w in warnings)
-    assert any("yt-dlp" in w for w in warnings)
-    assert any("npx" in w for w in warnings)
+    assert len(warnings) == 2
+    claude = next(w for w in warnings if "claude" in w)
+    assert "manual" in claude and "scheduled pipeline does not" in claude
+    yt = next(w for w in warnings if "yt-dlp" in w)
+    assert "brew install yt-dlp" in yt and "manual" in yt
+    assert not any("npx" in w for w in warnings)
 
 
 def test_check_dependencies_returns_empty_when_all_present():
@@ -179,6 +183,70 @@ def test_check_dependencies_returns_empty_when_all_present():
         warnings = _check_dependencies()
 
     assert warnings == []
+
+
+LLM = {"keychain_service": "melious-api-key", "model": "deepseek-v4.1-flash", "base_url": "https://x/v1"}
+SECRET = "sk-secret-123"
+
+
+class _FakeClient:
+    def __init__(self, error=None):
+        self.error = error
+        self.calls = []
+
+    def complete(self, messages, max_tokens):
+        self.calls.append(messages)
+        if self.error:
+            raise self.error
+
+
+def test_melious_check_warns_with_instructions_when_key_missing():
+    from src.llm import FatalRunError
+    from src.setup import _check_melious
+
+    def no_key(service, env_file):
+        raise FatalRunError("No Melious API key found.")
+
+    ok, message = _check_melious({"llm": LLM}, resolve_key=no_key, make_client=lambda c, k: _FakeClient())
+
+    assert ok is False
+    assert "MELIOUS_API_KEY=" in message and ".env" in message
+    assert "security add-generic-password" in message and "melious-api-key" in message
+
+
+def test_melious_check_reports_accepted_key_without_printing_it():
+    from src.setup import _check_melious
+
+    client = _FakeClient()
+    ok, message = _check_melious({"llm": LLM}, resolve_key=lambda s, e: SECRET, make_client=lambda c, k: client)
+
+    assert ok is True
+    assert "deepseek-v4.1-flash" in message
+    assert SECRET not in message
+    assert len(client.calls) == 1
+
+
+def test_melious_check_reports_rejected_key_or_model():
+    from src.llm import FatalRunError
+    from src.setup import _check_melious
+
+    client = _FakeClient(FatalRunError("Melious API rejected the request (HTTP 404): Model not found"))
+    ok, message = _check_melious({"llm": LLM}, resolve_key=lambda s, e: SECRET, make_client=lambda c, k: client)
+
+    assert ok is False
+    assert "HTTP 404" in message
+    assert SECRET not in message
+
+
+def test_melious_check_reports_unreachable_api():
+    from src.llm import LLMError
+    from src.setup import _check_melious
+
+    client = _FakeClient(LLMError("connection error: refused"))
+    ok, message = _check_melious({"llm": LLM}, resolve_key=lambda s, e: SECRET, make_client=lambda c, k: client)
+
+    assert ok is False
+    assert "connection error" in message
 
 
 def test_copy_interest_profile_skips_when_exists(tmp_path):
