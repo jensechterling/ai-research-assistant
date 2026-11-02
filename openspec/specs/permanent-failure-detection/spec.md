@@ -6,31 +6,20 @@ Keeps entries that can never be processed (paywalls, missing transcripts) out of
 
 ## Requirements
 
-### Requirement: Detect permanent failures from skill output
-When a skill completes without producing a note path, the system SHALL check the skill's stdout against a list of known permanent failure patterns (case-insensitive). If any pattern matches, the failure SHALL be classified as permanent.
-
-#### Scenario: Paywall detected in skill output
-- **WHEN** a skill returns exit code 0 but output contains "behind a paywall" and no note path is found
-- **THEN** the `SkillResult.permanent` flag SHALL be `True` and the error message SHALL indicate the content is behind a paywall
-
-#### Scenario: No permanent pattern matched
-- **WHEN** a skill returns exit code 0 but no note path is found and output does not match any permanent failure pattern
-- **THEN** the `SkillResult.permanent` flag SHALL be `False` and the error message SHALL indicate no note path was found
-
-#### Scenario: Skill exits with non-zero code
-- **WHEN** a skill exits with a non-zero return code
-- **THEN** permanent failure detection SHALL NOT be applied (the failure is treated as transient)
-
 ### Requirement: Skip retry queue for permanent failures
 When the pipeline encounters a permanent failure, it SHALL NOT add the entry to the retry queue. The entry SHALL be logged and counted separately from transient failures.
 
 #### Scenario: Permanent failure skips retry queue
-- **WHEN** `SkillResult.permanent` is `True`
+- **WHEN** the processing result for an entry is marked permanent
 - **THEN** the pipeline SHALL NOT call `add_to_retry_queue()` for that entry
 - **AND** the pipeline SHALL log a warning with `[PERMANENT]` prefix including the entry title and error
 
+#### Scenario: Permanent failure on a retry entry
+- **WHEN** an entry from the retry queue fails permanently
+- **THEN** it is removed from the retry queue and recorded as processed with no note path
+
 #### Scenario: Transient failure still retries
-- **WHEN** `SkillResult.permanent` is `False` and `SkillResult.success` is `False`
+- **WHEN** the processing result for an entry is a failure that is not marked permanent
 - **THEN** the pipeline SHALL add the entry to the retry queue as before
 
 ### Requirement: Track permanent failure count in PipelineResult
@@ -45,4 +34,22 @@ When permanent failures occur, the macOS notification SHALL include the permanen
 
 #### Scenario: Notification with permanent failures
 - **WHEN** the pipeline completes with 3 processed, 1 failed, and 2 permanent failures
-- **THEN** the notification message SHALL mention the permanent failure count (e.g., "2 skipped (paywall)")
+- **THEN** the notification message SHALL mention the permanent failure count as "2 skipped (not extractable)"
+
+### Requirement: Detect permanent failures from extraction
+The system SHALL classify a failure as permanent only when the content-extraction step reports it as permanent. Analysis and vault-output failures SHALL never be permanent.
+
+#### Scenario: Paywalled article
+- **WHEN** extraction reports a permanent "not extractable" failure
+- **THEN** the processing result is marked permanent and its error message gives the extraction reason
+
+#### Scenario: Analysis failure is not permanent
+- **WHEN** extraction succeeds but analysis fails
+- **THEN** the processing result is not marked permanent
+
+### Requirement: Permanent failures are not attempted again
+A permanently failed entry SHALL be recorded as processed with no note path, so later runs skip it.
+
+#### Scenario: Paywalled article on the next day
+- **WHEN** an entry failed permanently yesterday and is still in its feed today
+- **THEN** today's run does not extract it again and does not count it again
