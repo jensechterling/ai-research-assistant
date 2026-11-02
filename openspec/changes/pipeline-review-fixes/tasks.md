@@ -31,9 +31,9 @@ Every fix starts with a test that fails on the current code (test first), then t
 
 ## 6. Scripts and launchd
 
-- [ ] 6.1 In `scripts/run.sh`, capture the pipeline's exit status, run `backup_feeds.sh`, then exit with that status. Done when a test with a failing pipeline stub on a Monday shows the backup ran and the script exits non-zero.
-- [ ] 6.2 Rewrite `scripts/backup_feeds.sh` to commit `exports/feeds.opml` onto `backup/feeds` with a temporary index, push only when the tree changed, and drop the master-only guard. Update `tests/test_backup_script.py` with a bare remote. Done when tests show: the first Monday creates `backup/feeds` with only that file and pushes it; an unchanged export makes no commit and no push; HEAD, the index and staged changes on the checked-out branch are untouched; other weekdays do nothing.
-- [ ] 6.3 Change the PATH in `templates/com.claude.ai-research-assistant.plist.j2` to `/opt/homebrew/bin:/usr/bin:/bin:/usr/local/bin`. Done when the template-rendering test asserts the new order.
+- [x] 6.1 In `scripts/run.sh`, capture the pipeline's exit status, run `backup_feeds.sh`, then exit with that status. Done when a test with a failing pipeline stub on a Monday shows the backup ran and the script exits non-zero.
+- [x] 6.2 Rewrite `scripts/backup_feeds.sh` to commit `exports/feeds.opml` onto `backup/feeds` with a temporary index, push only when the tree changed, and drop the master-only guard. Update `tests/test_backup_script.py` with a bare remote. Done when tests show: the first Monday creates `backup/feeds` with only that file and pushes it; an unchanged export makes no commit and no push; HEAD, the index and staged changes on the checked-out branch are untouched; other weekdays do nothing.
+- [x] 6.3 Change the PATH in `templates/com.claude.ai-research-assistant.plist.j2` to `/opt/homebrew/bin:/usr/bin:/bin:/usr/local/bin`. Done when the template-rendering test asserts the new order.
 
 ## 7. Documentation and integration
 

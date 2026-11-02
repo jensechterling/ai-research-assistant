@@ -136,6 +136,8 @@ def test_render_templates_writes_plist_but_no_mcp_config(tmp_path, monkeypatch):
     assert not (tmp_path / "config" / "mcp-minimal.json").exists()
     plist = (tmp_path / "templates" / "com.claude.ai-research-assistant.plist").read_text()
     assert str(tmp_path) in plist
+    # Homebrew's arm64 git first: an old Intel-only /usr/local/bin/git must not win
+    assert "<string>/opt/homebrew/bin:/usr/bin:/bin:/usr/local/bin</string>" in plist
 
 
 def test_rendered_skills_contain_no_personal_references():
