@@ -533,3 +533,37 @@ def test_index_stems_ignore_case(vault):
     assert index.has_stem("weekly-roundup")
     assert index.has_stem("WEEKLY-ROUNDUP")
     assert not index.has_stem("Weekly-Roundup-2")
+
+
+# --- Templater dates in a new daily note ----------------------------------
+
+
+@pytest.mark.parametrize("template, expected", [
+    ('<% tp.date.now("YYYY-MM-DD", -1) %>', "2026-11-01"),
+    ('<% tp.date.now("YYYY-MM-DD", 1) %>', "2026-11-03"),
+    ("<% tp.date.now('YYYY-MM-DD',-7) %>", "2026-10-26"),
+    ('<% tp.date.now("dddd, MMMM Do YYYY") %>', "Monday, November 2nd 2026"),
+    ('<% tp.date.now("D.M.YYYY") %>', "2.11.2026"),
+    ('<% tp.date.now("ddd DD MMM YY") %>', "Mon 02 Nov 26"),
+    ("<% tp.date.now() %>", "2026-11-02"),
+])
+def test_templater_date_expressions(template, expected):
+    from src.vault_writer import _resolve_templater_dates
+
+    assert _resolve_templater_dates(template, date(2026, 11, 2)) == expected
+
+
+@pytest.mark.parametrize("day, ordinal", [(1, "1st"), (2, "2nd"), (3, "3rd"), (4, "4th"), (11, "11th"),
+                                          (12, "12th"), (13, "13th"), (21, "21st"), (22, "22nd"), (31, "31st")])
+def test_templater_ordinal_days(day, ordinal):
+    from src.vault_writer import _resolve_templater_dates
+
+    assert _resolve_templater_dates('<% tp.date.now("Do") %>', date(2026, 10, day)) == ordinal
+
+
+def test_other_templater_commands_are_left_alone():
+    from src.vault_writer import _resolve_templater_dates
+
+    text = '<% tp.file.title %> <% tp.date.now("YYYY", "P-1D") %>'
+
+    assert _resolve_templater_dates(text, date(2026, 11, 2)) == text

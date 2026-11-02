@@ -22,7 +22,7 @@ Every fix starts with a test that fails on the current code (test first), then t
 
 ## 4. Daily-note Templater dates
 
-- [ ] 4.1 Replace the token chain in `_resolve_templater_dates()` with a one-pass tokenizer (`YYYY YY MMMM MMM MM M Do DD D dddd ddd`) and accept an optional integer day offset. Done when tests give `2026-11-01` and `2026-11-03` for offsets -1 and 1, `Monday, November 2nd 2026` for `dddd, MMMM Do YYYY`, `2.11.2026` for `D.M.YYYY`, and leave other `<% %>` commands untouched.
+- [x] 4.1 Replace the token chain in `_resolve_templater_dates()` with a one-pass tokenizer (`YYYY YY MMMM MMM MM M Do DD D dddd ddd`) and accept an optional integer day offset. Done when tests give `2026-11-01` and `2026-11-03` for offsets -1 and 1, `Monday, November 2nd 2026` for `dddd, MMMM Do YYYY`, `2.11.2026` for `D.M.YYYY`, and leave other `<% %>` commands untouched.
 
 ## 5. Cost accounting
 

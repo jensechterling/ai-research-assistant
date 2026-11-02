@@ -3,7 +3,7 @@ import os
 import re
 import stat
 import tempfile
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -23,12 +23,26 @@ MAX_FILENAME_LENGTH = 80
 DAILY_DOSE_HEADING = "Daily Dose of Know-How"
 LOG_HEADER = "| Note | Evaluated | Category | Key Insight |"
 
-# Moment.js tokens used by Templater, longest first so "YYYY" wins over "YY"
-_MOMENT_TOKENS = [
-    ("YYYY", "%Y"), ("YY", "%y"), ("MMMM", "%B"), ("MMM", "%b"), ("MM", "%m"),
-    ("dddd", "%A"), ("ddd", "%a"), ("DD", "%d"),
-]
-_TEMPLATER_DATE = re.compile(r'<%\s*tp\.date\.now\(\s*(?:"([^"]*)"|\'([^\']*)\')?\s*\)\s*%>')
+# Moment.js tokens used by Templater, longest first so "YYYY" wins over "YY". One regex pass
+# means a short token like "D" never matches inside text another token produced.
+_MOMENT_TOKEN = re.compile(r"YYYY|YY|MMMM|MMM|MM|M|Do|DD|D|dddd|ddd")
+_MOMENT_FORMATS = {
+    "YYYY": lambda d: f"{d.year:04d}",
+    "YY": lambda d: f"{d.year % 100:02d}",
+    "MMMM": lambda d: d.strftime("%B"),
+    "MMM": lambda d: d.strftime("%b"),
+    "MM": lambda d: f"{d.month:02d}",
+    "M": lambda d: str(d.month),
+    "Do": lambda d: _ordinal(d.day),
+    "DD": lambda d: f"{d.day:02d}",
+    "D": lambda d: str(d.day),
+    "dddd": lambda d: d.strftime("%A"),
+    "ddd": lambda d: d.strftime("%a"),
+}
+# tp.date.now(), tp.date.now("FORMAT") or tp.date.now("FORMAT", N) with N an integer day offset
+_TEMPLATER_DATE = re.compile(
+    r'<%\s*tp\.date\.now\(\s*(?:(?:"([^"]*)"|\'([^\']*)\')\s*(?:,\s*(-?\d+)\s*)?)?\)\s*%>'
+)
 
 
 # --- note -----------------------------------------------------------------
@@ -210,11 +224,15 @@ def append_daily_dose(vault: Path, config: dict, *, link_stem: str, title: str, 
 def _resolve_templater_dates(text: str, today: date) -> str:
     def replace(match: re.Match) -> str:
         fmt = match.group(1) or match.group(2) or "YYYY-MM-DD"
-        for token, directive in _MOMENT_TOKENS:
-            fmt = fmt.replace(token, directive)
-        return today.strftime(fmt)
+        day = today + timedelta(days=int(match.group(3) or 0))
+        return _MOMENT_TOKEN.sub(lambda token: _MOMENT_FORMATS[token.group(0)](day), fmt)
 
     return _TEMPLATER_DATE.sub(replace, text)
+
+
+def _ordinal(n: int) -> str:
+    suffix = "th" if 11 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
 
 
 # --- evaluation log -------------------------------------------------------
