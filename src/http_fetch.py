@@ -14,6 +14,7 @@ class FetchResult:
     status: int
     text: str
     content: bytes
+    charset: str | None = None  # from the Content-Type header only; None when the header names none
 
 
 class FetchError(Exception):
@@ -49,7 +50,8 @@ def fetch(client: httpx.Client, url: str, *, max_bytes: int, deadline_seconds: f
                 chunks.append(chunk)
 
             content = b"".join(chunks)
-            text = content.decode(response.encoding or "utf-8", errors="replace")
-            return FetchResult(response.status_code, text, content)
+            charset = response.charset_encoding.lower() if response.charset_encoding else None
+            text = content.decode(charset or "utf-8", errors="replace")
+            return FetchResult(response.status_code, text, content, charset)
     except httpx.HTTPError as e:
         raise FetchError(f"{type(e).__name__}: {e}", permanent=False) from None

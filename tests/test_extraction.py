@@ -101,7 +101,15 @@ def test_long_text_is_truncated_and_marked():
     assert result.truncated is True
 
 
-@pytest.mark.parametrize("status", [401, 402, 403, 404, 410, 451])
+def test_bot_blocked_page_without_feed_text_is_transient():
+    with pytest.raises(ExtractionError) as exc:
+        _extract(_entry(content=_feed_html(40)), _client(status=403, body="Forbidden"))
+
+    assert exc.value.permanent is False
+    assert "403" in exc.value.reason
+
+
+@pytest.mark.parametrize("status", [401, 402, 404, 410, 451])
 def test_blocked_page_without_feed_text_is_permanent(status):
     with pytest.raises(ExtractionError) as exc:
         _extract(_entry(content=_feed_html(40)), _client(status=status, body="no"))
@@ -155,3 +163,44 @@ def test_pdf_link_without_feed_text_is_permanent():
 
     assert exc.value.permanent
     assert "application/pdf" in exc.value.reason
+
+
+def test_charset_declared_only_in_page_is_used():
+    sentence = "Grüße aus München, schöne Übung für Größenänderungen."
+    html = (
+        '<html><head><meta charset="iso-8859-1"><title>Über</title></head><body><article>'
+        + "".join(f"<p>Absatz {i}: {sentence} Weitere Wörter {i} über Käse und Brötchen. {sentence}</p>"
+                  for i in range(12))
+        + "</article></body></html>"
+    )
+
+    def handler(request):
+        return httpx.Response(200, headers={"content-type": "text/html"}, content=html.encode("iso-8859-1"))
+
+    result = _extract(_entry(), httpx.Client(transport=httpx.MockTransport(handler)))
+
+    assert "Grüße aus München" in result.text
+    assert "�" not in result.text
+
+
+def test_paywall_teaser_loses_to_longer_feed_text():
+    result = _extract(_entry(content=_feed_html(3000)), _client(body=_page(250)))
+
+    assert result.from_feed is True
+    assert result.word_count == 3000
+    assert result.title == "Page Title"
+    assert result.author == "Jane Doe"
+    assert result.published == "2026-10-01"
+
+
+def test_page_longer_than_feed_text_wins():
+    result = _extract(_entry(content=_feed_html(200)), _client(body=_page(400)))
+
+    assert result.from_feed is False
+    assert result.word_count >= 400
+
+
+def test_page_wins_a_tie():
+    result = _extract(_entry(content=_feed_html(300)), _client(body=_page(300)))
+
+    assert result.from_feed is False

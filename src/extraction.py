@@ -9,8 +9,9 @@ import trafilatura
 from src.http_fetch import FetchError, fetch
 from src.models import Entry
 
-# HTTP statuses that mean the page itself will not become readable on retry
-PERMANENT_STATUSES = {401, 402, 403, 404, 410, 451}
+# HTTP statuses that mean the page itself will not become readable on retry.
+# 403 is left out: bot blocks (Cloudflare and similar) are often lifted later.
+PERMANENT_STATUSES = {401, 402, 404, 410, 451}
 MAX_PAGE_BYTES = 10_000_000
 PAGE_DEADLINE_SECONDS = 90
 PAGE_TYPES = ("text/", "application/xhtml+xml")
@@ -41,14 +42,21 @@ class ExtractionError(Exception):
 
 
 def extract_article(entry: Entry, client: httpx.Client, min_words: int, max_words: int) -> ExtractedArticle:
-    """Extract the article for an entry from its page, falling back to the feed text."""
-    page, page_problem, page_permanent = _fetch_page(entry, client)
-    if page is not None and _word_count(page["text"]) >= min_words:
-        return _build(entry, page, from_feed=False, max_words=max_words)
+    """Extract the article for an entry, using whichever of page and feed text is longer.
 
+    A paywall teaser can pass min_words while the feed carries the full post, so the
+    page does not win just by being long enough. The page wins ties, and its metadata
+    is kept when the feed text is used.
+    """
+    page, page_problem, page_permanent = _fetch_page(entry, client)
+    page_words = _word_count(page["text"]) if page is not None else 0
     feed_text = _html_to_text(entry.content)
-    if _word_count(feed_text) >= min_words:
-        return _build(entry, {"text": feed_text}, from_feed=True, max_words=max_words)
+    feed_words = _word_count(feed_text)
+
+    if feed_words >= min_words and feed_words > page_words:
+        return _build(entry, {**(page or {}), "text": feed_text}, from_feed=True, max_words=max_words)
+    if page is not None and page_words >= min_words:
+        return _build(entry, page, from_feed=False, max_words=max_words)
 
     if page_problem and not page_permanent:
         raise ExtractionError(f"transient: {page_problem}", permanent=False)
@@ -68,9 +76,9 @@ def _fetch_page(entry: Entry, client: httpx.Client) -> tuple[dict | None, str | 
         permanent = response.status in PERMANENT_STATUSES
         return None, f"HTTP {response.status}", permanent
 
-    extracted = trafilatura.extract(
-        response.text, output_format="json", with_metadata=True, url=entry.url
-    )
+    # Without a header charset, bytes let trafilatura detect the encoding, including <meta charset>.
+    html = response.text if response.charset else response.content
+    extracted = trafilatura.extract(html, output_format="json", with_metadata=True, url=entry.url)
     if not extracted:
         return None, None, True
     return json.loads(extracted), None, True
