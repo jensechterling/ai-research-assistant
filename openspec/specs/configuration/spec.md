@@ -1,4 +1,9 @@
-## ADDED Requirements
+# configuration Specification
+
+## Purpose
+Loads layered configuration, version-controlled defaults deep-merged with gitignored user overrides, and gives the rest of the system accessors for the values it needs, so no path or folder is hardcoded.
+
+## Requirements
 
 ### Requirement: Layered configuration loading
 The system SHALL load configuration from `config/defaults.yaml` and deep-merge with `config/user.yaml` (if present). User values SHALL override defaults at any nesting level.

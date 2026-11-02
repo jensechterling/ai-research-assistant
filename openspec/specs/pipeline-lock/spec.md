@@ -1,4 +1,9 @@
-## ADDED Requirements
+# pipeline-lock Specification
+
+## Purpose
+Prevents two pipeline runs from working at the same time, so a scheduled run and a manual one cannot process the same entries twice or write the database concurrently.
+
+## Requirements
 
 ### Requirement: Pipeline mutual exclusion
 The system SHALL prevent concurrent pipeline runs using a file-based lock.
