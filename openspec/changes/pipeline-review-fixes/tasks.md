@@ -26,8 +26,8 @@ Every fix starts with a test that fails on the current code (test first), then t
 
 ## 5. Cost accounting
 
-- [ ] 5.1 Catch any `Exception` from the write step in `process()` and return a vault failure carrying the analysis cost. Done when a test whose writer raises `UnicodeDecodeError` gets a result with the analysis cost, and the run total includes it.
-- [ ] 5.2 Add `cost_eur` to `FatalRunError`; set it in `analyze()` when a repair or truncation retry hits an account error after a paid request, and add it to the run total in the pipeline before re-raising. Done when a test with a paid first request and a 402 on the repair turn records the first request's cost on the failed run.
+- [x] 5.1 Catch any `Exception` from the write step in `process()` and return a vault failure carrying the analysis cost. Done when a test whose writer raises `UnicodeDecodeError` gets a result with the analysis cost, and the run total includes it.
+- [x] 5.2 Add `cost_eur` to `FatalRunError`; set it in `analyze()` when a repair or truncation retry hits an account error after a paid request, and add it to the run total in the pipeline before re-raising. Done when an analysis test with a paid first request and a 402 on the repair turn raises with that cost, and a pipeline test shows the stopped run's cost includes it.
 
 ## 6. Scripts and launchd
 

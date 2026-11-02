@@ -68,6 +68,8 @@ class EntryProcessor:
             path = self._write(self._vault, self._config, article, result.analysis, self._today, index=self._index)
         except OSError as e:
             return ProcessingResult(False, step="vault", error=f"vault: {e}", cost_eur=cost)
+        except Exception as e:  # the analysis is paid for, so its cost must reach the run total
+            return ProcessingResult(False, step="vault", error=f"vault: {type(e).__name__}: {e}", cost_eur=cost)
         if not path.is_file():
             return ProcessingResult(False, step="vault", error=f"vault: note not found after write: {path}",
                                     cost_eur=cost)

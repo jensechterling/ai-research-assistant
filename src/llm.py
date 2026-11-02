@@ -15,7 +15,15 @@ FATAL_STATUSES = {401, 402, 403, 404}
 
 
 class FatalRunError(Exception):
-    """A problem that would fail every entry; the run must stop."""
+    """A problem that would fail every entry; the run must stop.
+
+    cost_eur is what the current entry had already spent when the error was raised,
+    so the run total still counts it.
+    """
+
+    def __init__(self, message: str, cost_eur: float = 0.0):
+        super().__init__(message)
+        self.cost_eur = cost_eur
 
 
 class LLMError(Exception):

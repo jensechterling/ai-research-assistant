@@ -430,3 +430,14 @@ def test_existing_note_match_does_not_count_as_analysis_working(db):
     result = _run(db, FakeFeeds(entries), FakeProcessor(outcomes))
 
     assert "3 analyses failed in a row" in result.stopped_reason
+
+
+def test_fatal_error_adds_its_spent_cost_to_the_run_total(db):
+    error = FatalRunError("Melious API rejected the request (HTTP 402)")
+    error.cost_eur = 0.004
+    processor = FakeProcessor({"b": error})
+
+    result = _run(db, FakeFeeds([_entry("a"), _entry("b")]), processor)
+
+    assert result.stopped_reason is not None
+    assert result.cost_eur == pytest.approx(0.014)

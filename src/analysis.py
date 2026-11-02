@@ -111,6 +111,9 @@ def analyze(article: ExtractedArticle, context: AnalysisContext, client, max_tok
             completion = client.complete(msgs, max_tokens=budget)
         except LLMError as e:
             raise AnalysisError(str(e), cost) from None
+        except FatalRunError as e:
+            e.cost_eur = cost  # earlier requests for this entry were paid for
+            raise
         cost += completion.usage.cost_eur
         return completion
 

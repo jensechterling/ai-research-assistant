@@ -225,3 +225,12 @@ def test_missing_knowledge_base_is_fatal(tmp_path):
         load_context(_config(), tmp_path, today=date(2026, 10, 30))
 
     assert "2 Know-how" in str(exc.value)
+
+
+def test_account_error_on_repair_carries_cost_of_paid_request():
+    client = FakeClient([_reply("not json", cost=0.004), FatalRunError("Melious API rejected the request (HTTP 402)")])
+
+    with pytest.raises(FatalRunError) as exc:
+        analyze(ARTICLE, CONTEXT, client, max_tokens=8000)
+
+    assert exc.value.cost_eur == pytest.approx(0.004)

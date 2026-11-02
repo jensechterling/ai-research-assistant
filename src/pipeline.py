@@ -302,7 +302,8 @@ def _process_entries(db: Database, processor, entries: list[Entry], retry_guids:
 
         try:
             outcome = processor.process(entry)
-        except FatalRunError:
+        except FatalRunError as e:
+            result.cost_eur += e.cost_eur
             raise
         except Exception as e:
             outcome = None

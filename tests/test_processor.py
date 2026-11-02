@@ -213,3 +213,14 @@ def test_second_entry_for_the_same_url_in_a_run_reuses_the_first_note(tmp_path):
     assert second.existing is True
     assert second.note_path == first.note_path
     assert len(list((tmp_path / "2 Know-how").rglob("*.md"))) == 1
+
+
+def test_unexpected_write_error_is_a_vault_failure_carrying_the_analysis_cost(tmp_path):
+    steps = Recorder(tmp_path, write_error=UnicodeDecodeError("utf-8", b"\xfc", 0, 1, "invalid start byte"))
+
+    result = _processor(steps).process(ENTRY)
+
+    assert result.success is False
+    assert result.step == "vault"
+    assert result.cost_eur == pytest.approx(0.003)
+    assert "UnicodeDecodeError" in result.error
