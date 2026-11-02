@@ -95,7 +95,7 @@ To remove the schedule:
 - **macOS**: `launchctl unload ~/Library/LaunchAgents/com.claude.ai-research-assistant.plist`
 - **Linux**: `crontab -e` and remove the `# ai-research-assistant` lines
 
-On Mondays the scheduled script also exports your feed list to `exports/feeds.opml` and commits only that file to the `backup/feeds` branch, which it pushes when the list changed. Your checked-out branch and `master` are not touched.
+On Mondays the scheduled script also exports your feed list and commits it as `exports/feeds.opml` to the `backup/feeds` branch, which it pushes whenever GitHub doesn't have the latest copy. Your checked-out branch and `master` are not touched.
 
 ## Configuration
 

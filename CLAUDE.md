@@ -47,7 +47,7 @@ FeedManager fetches RSS → pipeline selects entries → EntryProcessor: same-so
 6. Stops starting entries at `processing.max_run_minutes` or `llm.max_cost_per_run_eur`.
 
 **Modules:**
-- `src/extraction.py`: httpx download + trafilatura (raw bytes when the header names no charset), the longer of page and feed text wins, permanent vs transient classification (HTTP 403 is transient)
+- `src/extraction.py`: httpx download + trafilatura (decoded with the header charset, else the page's `<meta>` charset, else raw bytes for trafilatura to detect), the longer of page and feed text wins, permanent vs transient classification (HTTP 403 is transient)
 - `src/llm.py`: key resolution (env, `.env`, Keychain), `MeliousClient.complete()`, usage and EUR cost (prefers Melious's reported `billing_cost`)
 - `src/analysis.py`: prompt from `templates/prompts/`, pydantic `Analysis`, one repair turn, truncation retry with doubled token budget
 - `src/vault_writer.py`: note from `templates/notes/article.md.j2`, folder resolution, `VaultIndex` (sources and filename stems, built once per run; filenames are unique vault-wide and notes are never overwritten), temp-file-and-rename writes
@@ -68,4 +68,4 @@ FeedManager fetches RSS → pipeline selects entries → EntryProcessor: same-so
 - Melious only; `scripts/probe_melious.py` checks API behaviour (JSON mode, usage fields, error codes)
 - `openai` SDK 3.x uses `httpx2`, not `httpx`: test doubles for the SDK need `httpx2.MockTransport`
 - SQLite database in `data/pipeline.db` tracks processed entries, retry queue (with the entry's feed text and publication date, so retries keep the feed-text fallback), run history (with `error` for failed runs)
-- The Monday OPML backup (`scripts/backup_feeds.sh`) commits only `exports/feeds.opml` to the `backup/feeds` branch through a temporary index and never touches the checkout or `master`
+- The Monday OPML backup (`scripts/backup_feeds.sh`) exports to a temporary file, commits it as `exports/feeds.opml` onto `backup/feeds` (built on the fetched remote tip) through a temporary index, pushes whenever the remote is behind, and never touches the checkout or `master`

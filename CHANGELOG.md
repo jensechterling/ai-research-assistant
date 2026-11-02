@@ -24,7 +24,7 @@ The scheduled pipeline no longer runs Claude Code. It extracts articles in Pytho
 - Three analysis failures in a row at the start of a run stop it, so an outage or config error does not use up every entry's retry attempts
 - An unexpected crash shows a "Run stopped" notification
 - The notification passes its text to `osascript` as arguments
-- The Monday OPML backup moved to `scripts/backup_feeds.sh` and commits only `exports/feeds.opml` to the `backup/feeds` branch, pushing it when the list changed; the checkout and `master` are never touched
+- The Monday OPML backup moved to `scripts/backup_feeds.sh` and commits only `exports/feeds.opml` to the `backup/feeds` branch, pushing it whenever the remote is behind (a failed push is retried the next week); the checkout and `master` are never touched
 - Extraction uses whichever of the page and the feed text is longer, keeping the page's title and author, so a paywall teaser no longer beats the full post in the feed
 - HTTP 403 from an article page is retried instead of skipped for good
 - An entry whose URL already has a note in the vault is stored with that note instead of being analyzed and overwriting it
@@ -41,9 +41,9 @@ The scheduled pipeline no longer runs Claude Code. It extracts articles in Pytho
 - Templater commands (`<%`) in article or model text are neutralised before they reach the vault
 - Rewritten vault files kept the temporary file's owner-only permissions
 - Retries of entries that had left their feed lost the feed-text fallback and publication date
-- Pages with a charset declared only in `<meta>` were decoded as UTF-8 and lost their umlauts
+- Pages with a charset declared only in `<meta>` were decoded as UTF-8 and lost their accented characters
 - Notes with the same title in different folders shared one Daily Dose and evaluation-log link
-- New daily notes left `tp.date.now("FORMAT", offset)` unresolved and mis-rendered the `Do`, `D` and `M` tokens
+- New daily notes left `tp.date.now("FORMAT", offset)` unresolved and mis-rendered the `Do`, `D` and `M` tokens; `[bracketed]` text in a format is kept literally
 - Analysis cost was dropped from the run total when writing the note or a later request failed
 - A stopped run skipped the Monday OPML backup
 - The launchd PATH could pick an Intel-only `/usr/local/bin/git` on Apple Silicon

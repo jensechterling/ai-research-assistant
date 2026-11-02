@@ -54,13 +54,13 @@ A `VaultIndex` is built once per run: it walks the vault (skipping hidden folder
 
 Alternative: check only the target folder before writing, as today. Rejected: the target folder is known only after analysis, so the model call would already be paid for, and links resolve vault-wide.
 
-### 6. Bytes to trafilatura when the header names no charset
+### 6. Header charset, then the page's declared charset, then detection
 
-`fetch()` exposes the charset from the header, or `None`. With a header charset, trafilatura gets the decoded string as today. Without one, it gets `FetchResult.content`, and its own detection reads `<meta charset>`.
+`fetch()` exposes the charset from the header, or `None`. With a header charset, trafilatura gets the decoded string as today. Without one, the first 4 KB of the page are searched for `<meta charset=…>` or the `http-equiv` Content-Type charset, and the page is decoded with it. An unknown charset name, or none, passes the raw bytes to trafilatura. Its detection tries UTF-8, then guesses with charset_normalizer; code review found it does not read `<meta charset>` and garbles ISO-8859-2, which is why the declared charset is read here.
 
 ### 7. Templater dates through a tokenizer
 
-The single-pass `str.replace` chain becomes one regex over the Moment tokens (`YYYY`, `YY`, `MMMM`, `MMM`, `MM`, `M`, `Do`, `DD`, `D`, `dddd`, `ddd`), with each token formatted in Python. A single pass stops a short token like `D` from matching inside output already produced. The expression regex accepts an optional integer second argument, which shifts the date by that many days. Anything else inside `<% %>` is left as it is.
+The single-pass `str.replace` chain becomes one regex over the Moment tokens (`YYYY`, `YY`, `MMMM`, `MMM`, `MM`, `M`, `Do`, `DD`, `D`, `dddd`, `ddd`), with each token formatted in Python. A single pass stops a short token like `D` from matching inside output already produced. Text in `[brackets]` is copied literally, as in Moment, so words like `[Daily]` survive. The expression regex accepts an optional integer second argument, which shifts the date by that many days. Anything else inside `<% %>` is left as it is.
 
 ### 8. Cost survives later failures
 
@@ -72,7 +72,7 @@ The pipeline call becomes `$UV run ai-research-assistant run || status=$?`. The 
 
 ### 10. Backup commits to `backup/feeds` without touching the checkout
 
-`backup_feeds.sh` builds the commit with git plumbing and a temporary index file (`GIT_INDEX_FILE`). The tree holds only `exports/feeds.opml`. The parent is the local `backup/feeds` branch, or `origin/backup/feeds` after a fetch, or none on the first run. If the new tree equals the parent's tree, nothing is committed or pushed. Otherwise the script updates `refs/heads/backup/feeds` and runs `git push origin backup/feeds`. The working tree, the real index and the checked-out branch are never touched, so the master-only guard goes away.
+`backup_feeds.sh` exports to a temporary file (`feeds export --output`), because `exports/feeds.opml` is still tracked on master and an in-place export would leave the checkout modified. It builds the commit with git plumbing and a temporary index file (`GIT_INDEX_FILE`); the tree holds only `exports/feeds.opml`. Every run fetches `origin/backup/feeds`. The parent is the remote tip when known, else the local branch, else none. If the new tree equals the parent's tree, no commit is made. The local branch is set to the result, and the script pushes unless the fetch succeeded and the remote is already at that commit. So a push that failed one Monday is retried the next, even when the list did not change, and a backup made from another machine is built on rather than rejected as non-fast-forward. The working tree, the real index and the checked-out branch are never touched, so the master-only guard goes away.
 
 Alternative: check out `backup/feeds` in a temporary worktree. Rejected: it is slower, and it leaves state behind if the script is killed.
 

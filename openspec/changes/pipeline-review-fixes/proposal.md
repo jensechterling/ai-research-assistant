@@ -18,7 +18,7 @@ PR #2's own review accepted three of the ten as rare or harmless (`openspec/chan
   - pages are decoded using the charset in the HTML when the HTTP header gives none
   - analysis cost already spent is counted when a later step raises
   - `run.sh` still runs the Monday OPML backup after a stopped run
-  - `backup_feeds.sh` commits only `exports/feeds.opml` and pushes only when it made a commit
+  - `backup_feeds.sh` commits only `exports/feeds.opml` to a `backup/feeds` branch, building on the remote branch, and pushes whenever the remote is behind
   - the launchd PATH no longer finds an Intel-only `/usr/local/bin/git` before the Homebrew one
 
 ## Capabilities
