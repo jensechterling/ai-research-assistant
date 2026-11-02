@@ -37,8 +37,8 @@ Every fix starts with a test that fails on the current code (test first), then t
 
 ## 7. Documentation and integration
 
-- [ ] 7.1 Update `CLAUDE.md` (core flow: same-source check before analysis, 403 transient), `README.md` (weekly backup goes to `backup/feeds`) and add a `CHANGELOG.md` entry. Done when each statement matches the code.
-- [ ] 7.2 Run `uv run pytest tests/ -v`, `uv run ruff check src/ tests/` and `openspec validate pipeline-review-fixes --strict`. Done when all three pass.
+- [x] 7.1 Update `CLAUDE.md` (core flow: same-source check before analysis, 403 transient), `README.md` (weekly backup goes to `backup/feeds`) and add a `CHANGELOG.md` entry. Done when each statement matches the code.
+- [x] 7.2 Run `uv run pytest tests/ -v`, `uv run ruff check src/ tests/` and `openspec validate pipeline-review-fixes --strict`. Done when all three pass.
 - [ ] 7.3 Run `run --dry-run` from the worktree against a copy of the iMac database and vault, then `run --limit 3 --verbose` on the copy. Done when the log shows the same-source check and no warnings, and the copied database's `retry_queue` holds content for newly queued entries.
 
 ## Workflow follow-up

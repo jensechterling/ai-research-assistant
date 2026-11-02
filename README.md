@@ -95,7 +95,7 @@ To remove the schedule:
 - **macOS**: `launchctl unload ~/Library/LaunchAgents/com.claude.ai-research-assistant.plist`
 - **Linux**: `crontab -e` and remove the `# ai-research-assistant` lines
 
-On Mondays the scheduled script also exports your feed list to `exports/feeds.opml`, commits it and pushes, but only when the checkout is on `master`.
+On Mondays the scheduled script also exports your feed list to `exports/feeds.opml` and commits only that file to the `backup/feeds` branch, which it pushes when the list changed. Your checked-out branch and `master` are not touched.
 
 ## Configuration
 
@@ -190,9 +190,9 @@ src/
 
 1. `FeedManager` downloads each feed (with a timeout) and returns entries not yet processed.
 2. The run skips non-article feeds, entries older than `max_entry_age_days`, and failed entries still waiting for their retry time (backoff: 1h, 4h, 12h, 24h).
-3. For each entry, the article text is extracted. Blocked or too-short articles are skipped for good; network problems are retried later.
+3. For each entry, a note that already has the entry's URL as its `source` is reused: nothing is downloaded, analyzed or overwritten. Otherwise the article text is extracted, using whichever of the page and the feed's own text is longer. Paywalled, missing or too-short articles are skipped for good; network problems and HTTP 403 (often a temporary bot block) are retried later.
 4. One request to Melious returns a JSON analysis, which is validated. Invalid replies get one repair request, and replies cut off at the token limit are retried with a larger limit.
-5. The note is written into the chosen knowledge-base folder, then the daily note and evaluation log are updated.
+5. The note is written into the chosen knowledge-base folder under a filename not used anywhere else in the vault, then the daily note and evaluation log are updated.
 6. A rejected API key, an empty account, an unknown model or a missing profile stops the run without queueing anything. Results are tracked in SQLite (`data/pipeline.db`).
 
 ## Changelog
