@@ -1,0 +1,21 @@
+<?xml version='1.0' encoding='utf-8'?>
+<opml version="2.0">
+  <head>
+    <title>Content Pipeline Feeds</title>
+  </head>
+  <body>
+    <outline text="articles" title="articles">
+      <outline type="rss" text="Stratechery by Ben Thompson" title="Stratechery by Ben Thompson" xmlUrl="https://stratechery.com/feed/" />
+      <outline type="rss" text="Lenny's Newsletter" title="Lenny's Newsletter" xmlUrl="https://www.lennysnewsletter.com/feed" />
+      <outline type="rss" text="One Useful Thing" title="One Useful Thing" xmlUrl="https://www.oneusefulthing.org/feed" />
+      <outline type="rss" text="Recruiting Brainfood" title="Recruiting Brainfood" xmlUrl="https://recruitingbrainfood.substack.com/feed" />
+      <outline type="rss" text="The Pragmatic Engineer" title="The Pragmatic Engineer" xmlUrl="https://blog.pragmaticengineer.com/rss/" />
+      <outline type="rss" text="The Pragmatic Engineer" title="The Pragmatic Engineer" xmlUrl="https://newsletter.pragmaticengineer.com/feed" />
+      <outline type="rss" text="andrewchen" title="andrewchen" xmlUrl="https://andrewchen.com/feed/" />
+      <outline type="rss" text="Casey Accidental" title="Casey Accidental" xmlUrl="https://caseyaccidental.com/feed/" />
+      <outline type="rss" text="Essays - Benedict Evans" title="Essays - Benedict Evans" xmlUrl="https://www.ben-evans.com/benedictevans?format=rss" />
+      <outline type="rss" text="Simon Willison's Weblog" title="Simon Willison's Weblog" xmlUrl="https://simonwillison.net/atom/everything/" />
+      <outline type="rss" text="PKM Weekly" title="PKM Weekly" xmlUrl="https://www.pkmweekly.com/feed" />
+    </outline>
+  </body>
+</opml>
