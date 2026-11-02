@@ -50,7 +50,7 @@ Alternative: prefer the feed only when it is some multiple of the page length. R
 
 ### 5. One vault index per run
 
-A `VaultIndex` is built once per run: it walks the vault (skipping hidden folders), reads the frontmatter of notes that start with `---`, and keeps a `source → path` map and a set of lower-cased filename stems. Comparison is case-insensitive because macOS file names and Obsidian links are. The processor checks the index before analysis. On a hit it returns a success with the existing note path and zero cost, with no write and no bookkeeping, and the run log gives it its own line. `write_note()` picks the first stem not in the index, then adds the new note to it. A frontmatter `source` that is not a string is ignored.
+A `VaultIndex` is built once per run: it walks the vault (skipping hidden folders), reads the frontmatter of notes that start with `---`, and keeps a `source → path` map and a set of lower-cased filename stems. Comparison is case-insensitive because macOS file names and Obsidian links are. The processor checks the index first, before extraction, so a match costs neither a download nor a model call. On a hit it returns `ProcessingResult(success=True, existing=True, note_path=<existing>, cost_eur=0)`, with no write and no bookkeeping. `_process_entries()` handles `existing` before its success branch: it calls `mark_processed()` with that path and removes the entry from the retry queue, but does not touch `processed`, `retried`, `created_notes` or `analysis_worked`, and logs `[EXISTS] <title> → <path>`. `write_note()` picks the first stem not in the index, then adds both the new stem and the new `source → path` pair, so a second entry for the same URL in the same run is matched. A frontmatter `source` that is not a string is ignored.
 
 Alternative: check only the target folder before writing, as today. Rejected: the target folder is known only after analysis, so the model call would already be paid for, and links resolve vault-wide.
 
@@ -64,7 +64,7 @@ The single-pass `str.replace` chain becomes one regex over the Moment tokens (`Y
 
 ### 8. Cost survives later failures
 
-`process()` catches any `Exception` from the write step, not just `OSError`, and returns a vault-step failure that carries the analysis cost. `FatalRunError` gains a `cost_eur` field: the analysis sets it when a repair or truncation retry hits an account error after a paid request, and the pipeline adds it to the run total before re-raising.
+`process()` catches any `Exception` from the write step, not just `OSError`, and returns a vault-step failure that carries the analysis cost. `FatalRunError` gains a `cost_eur` field. `FatalRunError` is not a subclass of `LLMError`, so it passes straight through the `request()` helper inside `analyze()`; that helper gets an `except FatalRunError` that sets `cost_eur` to the cost so far and re-raises. The pipeline adds it to the run total before re-raising.
 
 ### 9. `run.sh` keeps the pipeline's exit status but always runs the backup
 
@@ -84,6 +84,7 @@ The plist template's PATH becomes `/opt/homebrew/bin:/usr/bin:/bin:/usr/local/bi
 
 - [The browser-style User-Agent may not get past Cloudflare, which also checks TLS and JavaScript] → Not verified. After a week on the iMac, compare the count of 403 failures in the run log with the week before.
 - [403 entries that never open stay in the queue for about 41 hours before being dropped] → That is the existing retry ceiling; the log shows each attempt.
+- [Feed text will win for most entries: PR #2's probe found full text in 10 of 11 live feeds, so page and feed lengths are often close and the winner can flip on a few words] → Page metadata is kept either way; the text differs mainly in boilerplate. Check `from_feed` in the first week's notes.
 - [The feed text can win while carrying newsletter footers or sponsor blocks] → Trafilatura already strips most of these from feed HTML; the note's collapsed original-text callout shows what was used.
 - [Exact URL match misses the same article under a different URL] → Accepted for now (see Non-Goals); the cost is a duplicate note, as today.
 - [Stored feed content enlarges `retry_queue`] → Rows are deleted on success or give-up; the queue is a few hundred rows at most.

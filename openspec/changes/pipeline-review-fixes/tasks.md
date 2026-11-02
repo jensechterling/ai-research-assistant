@@ -18,9 +18,9 @@ Every fix starts with a test that fails on the current code (test first), then t
 ## 3. Vault index: same source and unique filenames
 
 - [ ] 3.1 Add `VaultIndex` to `src/vault_writer.py`: one walk of the vault skipping hidden folders, a `source → path` map from frontmatter, lower-cased stems. Done when tests cover notes without frontmatter, a non-string `source`, a hidden folder that is skipped, and a case-only stem difference.
-- [ ] 3.2 Check the index in `EntryProcessor.process()` before analysis; on a hit, return success with the existing path, zero cost and no write or bookkeeping, and log it on its own line. Done when the clipped-note scenario test shows the note's bytes unchanged, no analyze call, and `mark_processed` with the existing path.
-- [ ] 3.3 Make `write_note()` pick the first stem free in the index and add the new note to it; remove the overwrite-on-same-source branch. Done when the same-title-in-another-folder test writes `Weekly-Roundup-2.md` and its Daily Dose and log links use that stem.
-- [ ] 3.4 Build the index once in `build_processor()` and pass it in. Done when a pipeline test with two entries for one URL makes one model call and writes one note.
+- [ ] 3.2 Check the index in `EntryProcessor.process()` before extraction; on a hit, return `ProcessingResult(success=True, existing=True, ...)` with the existing path, zero cost and no download, write or bookkeeping. Done when the clipped-note scenario test shows the note's bytes unchanged and no extract or analyze call.
+- [ ] 3.3 Make `write_note()` pick the first stem free in the index and add the new stem and `source → path` pair to it; remove the overwrite-on-same-source branch. Done when the same-title-in-another-folder test writes `Weekly-Roundup-2.md` and its Daily Dose and log links use that stem.
+- [ ] 3.4 Build the index once in `build_processor()` and pass it in; in `_process_entries()`, handle `existing` before the success branch (`mark_processed` with the existing path, remove from the retry queue, `[EXISTS]` log line, no change to `processed`, `retried`, `created_notes` or `analysis_worked`). Done when pipeline tests show: two entries for one URL make one model call and one note; the "Processed 3" scenario from the entry-processing spec; and an existing-note match followed by 3 analysis failures still stops the run.
 
 ## 4. Daily-note Templater dates
 

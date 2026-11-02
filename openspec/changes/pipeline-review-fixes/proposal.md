@@ -4,6 +4,8 @@
 
 A code review of the Melious API pipeline (PR #2) found ten defects. Four lose articles or overwrite notes the user wrote by hand. On 2 November 2026 the new pipeline processed its first entries on the iMac, so these rules now decide what reaches the vault every morning.
 
+PR #2's own review accepted three of the ten as rare or harmless (`openspec/changes/archive/2026-10-31-api-pipeline/design.md`, "Not changed"): same-title notes in different folders, cost lost when writing raises a non-`OSError`, and `run.sh` skipping the Monday backup after a stopped run. They are fixed here because each fix is small and the user asked for all ten.
+
 ## What Changes
 
 - An HTTP 403 page response becomes a transient failure: it is retried, not marked "not extractable" at once. Cloudflare, Medium and Substack often answer 403 to an unknown client, and that block is often temporary. 401, 402, 404, 410 and 451 stay permanent.
@@ -30,6 +32,7 @@ None.
 
 - `content-extraction`: page vs feed text choice by length; 403 transient; retry entries keep stored feed text.
 - `vault-output`: existing note for the same source is reused, not replaced; filenames unique vault-wide; evaluation-log row no longer replaced by a rewrite; Templater date expressions with an offset and more Moment tokens.
+- `entry-processing`: the existing-note check runs first in the per-entry order; a matched entry is stored as processed but not counted in the run totals, and does not count as an analysis that worked.
 
 ## Impact
 

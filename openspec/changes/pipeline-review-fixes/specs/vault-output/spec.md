@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Existing note for the same source
-Before an entry is analyzed, the system SHALL look for a note anywhere in the vault, outside hidden folders, whose frontmatter `source` equals the entry URL. If one exists, the entry SHALL be recorded as processed with that note's path, with no analysis, no new or changed note, and no Daily Dose or evaluation-log change.
+Before an entry is extracted, the system SHALL look for a note anywhere in the vault, outside hidden folders, whose frontmatter `source` equals the entry URL. If one exists, the entry SHALL be recorded as processed with that note's path, with no download, no analysis, no new or changed note, and no Daily Dose or evaluation-log change.
 
 #### Scenario: Article already clipped by hand
 - **WHEN** the user clipped an article into `2 Know-how/Product/` with `source: https://example.com/a` and annotated it, and a feed later delivers `https://example.com/a` under a new guid
