@@ -1,4 +1,9 @@
-## ADDED Requirements
+# skill-templates Specification
+
+## Purpose
+Keeps the manual Claude Code skills as Jinja2 templates rendered from the user's configuration, so the repository holds no personal paths or names and each user gets skills that match their vault.
+
+## Requirements
 
 ### Requirement: Skills stored as Jinja2 templates
 The system SHALL store article, youtube, podcast, and evaluate-knowledge skills as Jinja2 templates in `skills/_templates/`. Generated skill files SHALL be gitignored.

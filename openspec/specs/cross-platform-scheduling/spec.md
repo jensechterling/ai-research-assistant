@@ -1,3 +1,10 @@
+# cross-platform-scheduling Specification
+
+## Purpose
+Installs the daily pipeline run with the scheduler native to the platform: launchd on macOS and cron on Linux.
+
+## Requirements
+
 ### Requirement: Cron-based scheduling on Linux
 The system SHALL install a cron job when `--install-schedule` is used on Linux, using the configured schedule hour and minute.
 
