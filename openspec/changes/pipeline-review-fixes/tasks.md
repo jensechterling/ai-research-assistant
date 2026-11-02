@@ -9,9 +9,9 @@ Every fix starts with a test that fails on the current code (test first), then t
 - [x] 1.3 Choose the text with more words (page wins ties), keeping page metadata when the feed text wins. Done when tests cover the paywall-teaser scenario (250-word page, 3,000-word feed: feed text, page title and author, `from_feed=True`) and the readable-article scenario (page longer: page text).
 ## 2. Retry entries keep their feed text
 
-- [ ] 2.1 Add nullable `entry_content` and `published_at` columns to `retry_queue` in the startup migration in `src/database.py`. Done when a test opens a database created with the old schema and finds both columns, with existing rows intact.
-- [ ] 2.2 Store both in `add_to_retry_queue()`, never replacing stored content with an empty value on re-queue. Done when tests cover first queueing, re-queueing with content, and re-queueing with empty content (stored text kept).
-- [ ] 2.3 Rebuild retry entries in `_select_entries()` from the stored columns. Done when a pipeline test queues an entry with 1,200 words of feed content, drops it from the feed, serves a 403 page, and gets a note; a second test with NULL content still uses the page only.
+- [x] 2.1 Add nullable `entry_content` and `published_at` columns to `retry_queue` in the startup migration in `src/database.py`. Done when a test opens a database created with the old schema and finds both columns, with existing rows intact.
+- [x] 2.2 Store both in `add_to_retry_queue()`, never replacing stored content with an empty value on re-queue. Done when tests cover first queueing, re-queueing with content, and re-queueing with empty content (stored text kept).
+- [x] 2.3 Rebuild retry entries in `_select_entries()` from the stored columns, and pass the entry's content and date when queueing. Done when pipeline tests show a failed entry queued with its feed text and date, a retry that left its feed handed to the processor with that stored text and date, and a row with NULL content still giving empty content; `test_blocked_page_is_rescued_by_feed_text` covers the 403-plus-feed-text extraction step.
 
 ## 3. Vault index: same source and unique filenames
 

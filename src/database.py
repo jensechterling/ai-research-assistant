@@ -1,7 +1,7 @@
 """SQLite database for pipeline state management."""
 import sqlite3
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 
 class Database:
@@ -45,6 +45,8 @@ class Database:
         next_retry_at TIMESTAMP,
         retry_count INTEGER DEFAULT 0,
         last_error TEXT,
+        entry_content TEXT,
+        published_at TIMESTAMP,
         FOREIGN KEY (feed_id) REFERENCES feeds(id)
     );
 
@@ -81,6 +83,11 @@ class Database:
         columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(pipeline_runs)")}
         if "error" not in columns:
             self.conn.execute("ALTER TABLE pipeline_runs ADD COLUMN error TEXT")
+        # Retry rows created before they kept the feed text and publication date
+        columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(retry_queue)")}
+        for name, kind in (("entry_content", "TEXT"), ("published_at", "TIMESTAMP")):
+            if name not in columns:
+                self.conn.execute(f"ALTER TABLE retry_queue ADD COLUMN {name} {kind}")
         self.conn.commit()
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -190,11 +197,19 @@ class Database:
         entry_title: str | None,
         category: str,
         error: str,
+        entry_content: str | None = None,
+        published_at: datetime | None = None,
     ) -> bool:
         """Add failed entry to retry queue with exponential backoff.
 
+        The feed content and publication date are kept so a retry still has the
+        feed-text fallback after the item has left its feed. Re-queueing without
+        them keeps what was stored.
+
         Returns False when the entry has used up its attempts and was dropped.
         """
+        content = entry_content or None
+        published = published_at.isoformat() if published_at else None
         # Check if already in retry queue
         existing = self.execute(
             "SELECT retry_count FROM retry_queue WHERE entry_guid = ?",
@@ -214,19 +229,21 @@ class Database:
                    SET retry_count = ?,
                        last_attempt_at = CURRENT_TIMESTAMP,
                        next_retry_at = datetime('now', '+' || ? || ' hours'),
-                       last_error = ?
+                       last_error = ?,
+                       entry_content = COALESCE(?, entry_content),
+                       published_at = COALESCE(?, published_at)
                    WHERE entry_guid = ?""",
-                (retry_count, backoff, error, entry_guid),
+                (retry_count, backoff, error, content, published, entry_guid),
             )
         else:
             backoff = self.BACKOFF_HOURS[0]
             self.execute(
                 """INSERT INTO retry_queue
                    (entry_guid, feed_id, entry_url, entry_title, category,
-                    last_attempt_at, next_retry_at, last_error)
+                    last_attempt_at, next_retry_at, last_error, entry_content, published_at)
                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP,
-                           datetime('now', '+' || ? || ' hours'), ?)""",
-                (entry_guid, feed_id, entry_url, entry_title, category, backoff, error),
+                           datetime('now', '+' || ? || ' hours'), ?, ?, ?)""",
+                (entry_guid, feed_id, entry_url, entry_title, category, backoff, error, content, published),
             )
         self.commit()
         return True

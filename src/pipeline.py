@@ -241,9 +241,12 @@ def _select_entries(db: Database, feed_manager, config: dict, now: datetime, lim
         if row["category"] != SUPPORTED_CATEGORY:
             unsupported[(f"feed {row['feed_id']}", row["category"])] += 1
             continue
+        published = row["published_at"]
         entries.append(Entry(
-            guid=row["entry_guid"], title=row["entry_title"] or "Untitled", url=row["entry_url"], content="",
-            author=None, published_at=None, feed_id=row["feed_id"], feed_title="", category=row["category"],
+            guid=row["entry_guid"], title=row["entry_title"] or "Untitled", url=row["entry_url"],
+            content=row["entry_content"] or "", author=None,
+            published_at=datetime.fromisoformat(published) if published else None,
+            feed_id=row["feed_id"], feed_title="", category=row["category"],
         ))
 
     for (feed, category), count in unsupported.items():
@@ -328,6 +331,7 @@ def _process_entries(db: Database, processor, entries: list[Entry], retry_guids:
             still_queued = db.add_to_retry_queue(
                 entry_guid=entry.guid, feed_id=entry.feed_id, entry_url=entry.url,
                 entry_title=entry.title, category=entry.category, error=error,
+                entry_content=entry.content, published_at=entry.published_at,
             )
             if not still_queued:
                 db.mark_processed(entry.guid, entry.feed_id, entry.url, entry.title, None)

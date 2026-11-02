@@ -350,3 +350,40 @@ def test_crash_sends_run_stopped_notification(db):
         _run(db, FakeFeeds(error=RuntimeError("disk full")), FakeProcessor(), notes=notes)
 
     assert "disk full" in notes[0].stopped_reason
+
+
+def test_transient_failure_is_queued_with_feed_content_and_date(db):
+    entry = _entry("a")
+    processor = FakeProcessor({"a": ProcessingResult(False, step="extraction", error="extraction: transient: HTTP 503")})
+
+    _run(db, FakeFeeds([entry]), processor)
+
+    row = db.execute("SELECT entry_content, published_at FROM retry_queue WHERE entry_guid = 'a'").fetchone()
+    assert row["entry_content"] == "feed text"
+    assert datetime.fromisoformat(row["published_at"]) == entry.published_at
+
+
+def test_retry_that_left_the_feed_keeps_stored_content_and_date(db):
+    entry = _entry("a", days_old=30)
+    db.add_to_retry_queue(entry.guid, entry.feed_id, entry.url, entry.title, entry.category, "HTTP 403",
+                          entry_content="<p>stored full text</p>", published_at=entry.published_at)
+    db.execute("UPDATE retry_queue SET next_retry_at = datetime('now', '-1 hour')")
+    db.commit()
+    processor = FakeProcessor()
+
+    result = _run(db, FakeFeeds([]), processor)
+
+    assert processor.seen[0].content == "<p>stored full text</p>"
+    assert processor.seen[0].published_at == entry.published_at
+    assert result.retried == 1
+
+
+def test_retry_queued_without_content_has_empty_content(db):
+    entry = _entry("a")
+    _queue(db, entry, due=True)
+    processor = FakeProcessor()
+
+    _run(db, FakeFeeds([]), processor)
+
+    assert processor.seen[0].content == ""
+    assert processor.seen[0].published_at is None
