@@ -19,6 +19,7 @@ from src.feed_manager import FeedManager
 from src.llm import FatalRunError, MeliousClient, resolve_api_key
 from src.models import Entry
 from src.processor import EntryProcessor
+from src.vault_writer import VaultIndex
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,8 @@ def build_processor(config: dict, today: date) -> EntryProcessor:
         headers={"User-Agent": config["feeds"]["user_agent"]},
         follow_redirects=True,
     )
-    return EntryProcessor(config, vault, context, MeliousClient(config["llm"], key), http_client, today)
+    return EntryProcessor(config, vault, context, MeliousClient(config["llm"], key), http_client, today,
+                          index=VaultIndex.build(vault))
 
 
 def run_pipeline(
@@ -308,6 +310,14 @@ def _process_entries(db: Database, processor, entries: list[Entry], retry_guids:
         else:
             error = outcome.error or "Unknown error"
             result.cost_eur += outcome.cost_eur
+
+        if outcome is not None and outcome.existing:
+            # Already in the vault: stored as processed, but not counted, and no analysis ran.
+            db.mark_processed(entry.guid, entry.feed_id, entry.url, entry.title, outcome.note_path)
+            if is_retry:
+                db.remove_from_retry_queue(entry.guid)
+            logger.info(f"[EXISTS] {entry.title} → {outcome.note_path}")
+            continue
 
         if outcome is not None and (outcome.success or outcome.step == "vault"):
             analysis_worked = True

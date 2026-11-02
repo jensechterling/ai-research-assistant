@@ -179,13 +179,33 @@ def test_same_title_different_source_gets_numbered_suffix(vault):
     assert first.exists()
 
 
-def test_same_source_replaces_existing_note(vault):
+def test_existing_note_is_never_overwritten(vault):
     first = write_note(vault, CONFIG, _article(), _analysis(summary="old"), TODAY)
     second = write_note(vault, CONFIG, _article(), _analysis(summary="new"), TODAY)
 
-    assert second == first
-    assert "new" in first.read_text()
-    assert len(list(first.parent.glob("*.md"))) == 1
+    assert second.name == "Agent-Evals-A-Guide-2.md"
+    assert "old" in first.read_text()
+
+
+def test_same_title_in_another_folder_gets_numbered_suffix(vault):
+    _note(vault / "2 Know-how" / "AI & ML" / "Weekly-Roundup.md", "https://a.example/roundup")
+
+    path = write_note(vault, CONFIG, _article(title="Weekly Roundup", url="https://b.example/roundup"),
+                      _analysis(kb_folder="Leadership"), TODAY)
+
+    assert path == vault / "2 Know-how" / "Leadership" / "Weekly-Roundup-2.md"
+
+
+def test_written_note_is_added_to_the_index(vault):
+    from src.vault_writer import VaultIndex
+
+    index = VaultIndex.build(vault)
+    path = write_note(vault, CONFIG, _article(), _analysis(), TODAY, index=index)
+    second = write_note(vault, CONFIG, _article(url="https://other.example/x"), _analysis(kb_folder="Leadership"),
+                        TODAY, index=index)
+
+    assert index.find_source(URL) == path
+    assert second.stem == "Agent-Evals-A-Guide-2"
 
 
 def test_no_temporary_files_left_behind(vault):
@@ -461,3 +481,55 @@ def test_folder_equal_to_knowledge_base_name_goes_to_fallback(vault):
     path = write_note(vault, CONFIG, _article(), _analysis(kb_folder="2 Know-how"), TODAY)
 
     assert path.parent == vault / "2 Know-how" / "Misc"
+
+
+# --- vault index: same source and unique filenames ------------------------
+
+
+def _note(path, source=None, body="text"):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    front = f"---\nsource: {source}\n---\n" if source is not None else ""
+    path.write_text(front + body)
+    return path
+
+
+def test_index_maps_sources_and_skips_hidden_folders(vault):
+    from src.vault_writer import VaultIndex
+
+    clipped = _note(vault / "2 Know-how" / "AI & ML" / "Clipped.md", "https://example.com/a")
+    _note(vault / ".trash" / "Old.md", "https://example.com/trashed")
+    _note(vault / "2 Know-how" / ".hidden" / "Secret.md", "https://example.com/hidden")
+
+    index = VaultIndex.build(vault)
+
+    assert index.find_source("https://example.com/a") == clipped
+    assert index.find_source("https://example.com/trashed") is None
+    assert index.find_source("https://example.com/hidden") is None
+    assert not index.has_stem("Old")
+
+
+def test_index_handles_notes_without_frontmatter_or_string_source(vault):
+    from src.vault_writer import VaultIndex
+
+    _note(vault / "Plain.md", body="no frontmatter here")
+    (vault / "Listed.md").write_text("---\nsource:\n  - https://example.com/list\n---\nbody")
+    (vault / "Broken.md").write_text("---\nsource: [unclosed\n---\nbody")
+    (vault / "Latin.md").write_bytes("---\nsource: https://example.com/l\n---\nGr\xfc\xdfe".encode("latin-1"))
+
+    index = VaultIndex.build(vault)
+
+    assert index.has_stem("Plain") and index.has_stem("Listed") and index.has_stem("Broken")
+    assert index.find_source("https://example.com/list") is None
+    assert index.find_source("https://example.com/l") == vault / "Latin.md"
+
+
+def test_index_stems_ignore_case(vault):
+    from src.vault_writer import VaultIndex
+
+    _note(vault / "2 Know-how" / "AI & ML" / "Weekly-Roundup.md")
+
+    index = VaultIndex.build(vault)
+
+    assert index.has_stem("weekly-roundup")
+    assert index.has_stem("WEEKLY-ROUNDUP")
+    assert not index.has_stem("Weekly-Roundup-2")

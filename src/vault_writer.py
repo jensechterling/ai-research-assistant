@@ -58,21 +58,29 @@ def render_note(article: ExtractedArticle, analysis: Analysis, today: date) -> s
     return _defuse(f"---\n{header}---\n\n{body}")
 
 
-def write_note(vault: Path, config: dict, article: ExtractedArticle, analysis: Analysis, today: date) -> Path:
-    """File the note into the knowledge base and return its path."""
+def write_note(vault: Path, config: dict, article: ExtractedArticle, analysis: Analysis, today: date,
+               index: "VaultIndex | None" = None) -> Path:
+    """File the note into the knowledge base under a filename unused anywhere in the vault.
+
+    An existing note is never overwritten. The new note is added to the index, so a later
+    entry in the same run sees its name and source.
+    """
+    if index is None:
+        index = VaultIndex.build(vault)
     folders = config["folders"]
     kb_path = vault / folders["knowledge_base"]
     folder = _resolve_folder(kb_path, folders["knowledge_base"], analysis.kb_folder, folders["kb_fallback"])
     folder.mkdir(parents=True, exist_ok=True)
 
-    stem = sanitize_filename(article.title)
-    path = folder / f"{stem}.md"
-    suffix = 2
-    while path.exists() and _note_source(path) != article.url:
-        path = folder / f"{stem}-{suffix}.md"
+    base = sanitize_filename(article.title)
+    stem, suffix = base, 2
+    while index.has_stem(stem) or (folder / f"{stem}.md").exists():
+        stem = f"{base}-{suffix}"
         suffix += 1
+    path = folder / f"{stem}.md"
 
     atomic_write(path, render_note(article, analysis, today))
+    index.add(path, article.url)
     return path
 
 
@@ -99,15 +107,64 @@ def _resolve_folder(kb_path: Path, kb_name: str, requested: str, fallback: str) 
     return kb_path / name
 
 
+# --- vault index ----------------------------------------------------------
+
+FRONTMATTER_READ_LIMIT = 65_536  # frontmatter sits at the top; no need to read whole notes
+
+
+class VaultIndex:
+    """Source URLs and filename stems of every note in the vault, built once per run.
+
+    Links to notes use the bare filename and Obsidian resolves them vault-wide and
+    case-insensitively, so stems are compared lower-cased across the whole vault.
+    Hidden folders (.obsidian, .trash) are skipped.
+    """
+
+    def __init__(self) -> None:
+        self._sources: dict[str, Path] = {}
+        self._stems: set[str] = set()
+
+    @classmethod
+    def build(cls, vault: Path) -> "VaultIndex":
+        index = cls()
+        for root, dirs, files in os.walk(vault):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            for name in files:
+                if name.endswith(".md") and not name.startswith("."):
+                    path = Path(root) / name
+                    index.add(path, _note_source(path))
+        return index
+
+    def add(self, path: Path, source: str | None) -> None:
+        self._stems.add(path.stem.lower())
+        if source and source not in self._sources:
+            self._sources[source] = path
+
+    def find_source(self, url: str) -> Path | None:
+        return self._sources.get(url)
+
+    def has_stem(self, stem: str) -> bool:
+        return stem.lower() in self._stems
+
+
 def _note_source(path: Path) -> str | None:
-    text = path.read_text()
-    if not text.startswith("---\n"):
+    """The note's frontmatter `source` when it is a string, else None."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            head = f.read(FRONTMATTER_READ_LIMIT)
+    except OSError:
+        return None
+    if not head.startswith("---\n"):
+        return None
+    parts = head.split("\n---", 1)
+    if len(parts) < 2:
         return None
     try:
-        frontmatter = yaml.safe_load(text.split("---\n", 2)[1]) or {}
-    except (yaml.YAMLError, IndexError):
+        frontmatter = yaml.safe_load(parts[0][4:])
+    except yaml.YAMLError:
         return None
-    return frontmatter.get("source") if isinstance(frontmatter, dict) else None
+    source = frontmatter.get("source") if isinstance(frontmatter, dict) else None
+    return source if isinstance(source, str) else None
 
 
 # --- daily note -----------------------------------------------------------

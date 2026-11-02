@@ -387,3 +387,46 @@ def test_retry_queued_without_content_has_empty_content(db):
 
     assert processor.seen[0].content == ""
     assert processor.seen[0].published_at is None
+
+
+def _existing(guid: str) -> ProcessingResult:
+    return ProcessingResult(True, note_path=Path(f"/vault/clipped-{guid}.md"), existing=True)
+
+
+def test_entry_matched_to_existing_note_is_stored_but_not_counted(db, caplog):
+    from src.pipeline import notification_text
+
+    entries = [_entry(g) for g in "abcd"]
+    processor = FakeProcessor({"a": _existing("a")})
+
+    with caplog.at_level("INFO"):
+        result = _run(db, FakeFeeds(entries), processor, verbose=True)
+
+    assert result.processed == 3
+    assert len(result.created_notes) == 3
+    assert all(db.is_processed(g) for g in "abcd")
+    row = db.execute("SELECT note_path FROM processed_entries WHERE entry_guid = 'a'").fetchone()
+    assert row["note_path"] == "/vault/clipped-a.md"
+    assert notification_text(result)[1].startswith("Processed 3")
+    assert "[EXISTS] Title a" in caplog.text
+
+
+def test_retry_matched_to_existing_note_leaves_queue_without_counting_as_retried(db):
+    entry = _entry("a")
+    _queue(db, entry, due=True)
+
+    result = _run(db, FakeFeeds([entry]), FakeProcessor({"a": _existing("a")}))
+
+    assert db.get_queued_guids() == set()
+    assert db.is_processed("a")
+    assert result.retried == 0
+
+
+def test_existing_note_match_does_not_count_as_analysis_working(db):
+    entries = [_entry(f"e{i}") for i in range(5)]
+    outcomes = {e.guid: _analysis_failure() for e in entries[1:]}
+    outcomes["e0"] = _existing("e0")
+
+    result = _run(db, FakeFeeds(entries), FakeProcessor(outcomes))
+
+    assert "3 analyses failed in a row" in result.stopped_reason
