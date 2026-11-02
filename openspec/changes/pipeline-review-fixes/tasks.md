@@ -6,7 +6,7 @@ Every fix starts with a test that fails on the current code (test first), then t
 
 - [x] 1.1 In `src/http_fetch.py`, expose the header charset (or `None`) on `FetchResult`; in `src/extraction.py`, pass `content` bytes to trafilatura when it is `None`. Done when a test serving an ISO-8859-1 page with `<meta charset="iso-8859-1">` and no header charset gets `Grüße aus München` back, and fails on the old code.
 - [x] 1.2 Move 403 out of `PERMANENT_STATUSES`. Done when `tests/test_extraction.py` shows 403 with short feed text raises a transient `ExtractionError`, and 401, 402, 404, 410 and 451 stay permanent.
-- [x] 1.3 Choose the text with more words (page wins ties), keeping page metadata when the feed text wins. Done when tests cover the paywall-teaser scenario (250-word page, 3,000-word feed: feed text, page title and author, `from_feed=True`) and the readable-article scenario (page longer: page text).
+- [x] 1.3 Choose the text with more words (page wins ties), keeping page metadata when the feed text wins, and reword the feed-text line in the note and prompt templates. Done when tests cover the paywall-teaser scenario (250-word page, 3,000-word feed: feed text, page title and author, `from_feed=True`) and the readable-article scenario (page longer: page text).
 ## 2. Retry entries keep their feed text
 
 - [x] 2.1 Add nullable `entry_content` and `published_at` columns to `retry_queue` in the startup migration in `src/database.py`. Done when a test opens a database created with the old schema and finds both columns, with existing rows intact.
@@ -31,7 +31,7 @@ Every fix starts with a test that fails on the current code (test first), then t
 
 ## 6. Scripts and launchd
 
-- [x] 6.1 In `scripts/run.sh`, capture the pipeline's exit status, run `backup_feeds.sh`, then exit with that status. Done when a test with a failing pipeline stub on a Monday shows the backup ran and the script exits non-zero.
+- [x] 6.1 In `scripts/run.sh`, capture the pipeline's exit status, run `backup_feeds.sh`, then exit with the pipeline's status, or the backup's when the pipeline succeeded. Done when `tests/test_run_script.py` shows the backup ran after a failing pipeline stub and the script exits non-zero, and a failing backup after a successful pipeline also exits non-zero.
 - [x] 6.2 Rewrite `scripts/backup_feeds.sh` to commit `exports/feeds.opml` onto `backup/feeds` with a temporary index, push only when the tree changed, and drop the master-only guard. Update `tests/test_backup_script.py` with a bare remote. Done when tests show: the first Monday creates `backup/feeds` with only that file and pushes it; an unchanged export makes no commit and no push; HEAD, the index and staged changes on the checked-out branch are untouched; other weekdays do nothing.
 - [x] 6.3 Change the PATH in `templates/com.claude.ai-research-assistant.plist.j2` to `/opt/homebrew/bin:/usr/bin:/bin:/usr/local/bin`. Done when the template-rendering test asserts the new order.
 

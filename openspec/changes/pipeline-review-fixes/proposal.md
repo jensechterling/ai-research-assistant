@@ -35,7 +35,7 @@ None.
 
 ## Impact
 
-- Code: `src/extraction.py`, `src/http_fetch.py`, `src/pipeline.py`, `src/processor.py`, `src/database.py`, `src/vault_writer.py`, `scripts/run.sh`, `scripts/backup_feeds.sh`, `templates/com.claude.ai-research-assistant.plist.j2`.
+- Code: `src/extraction.py`, `src/http_fetch.py`, `src/pipeline.py`, `src/processor.py`, `src/database.py`, `src/vault_writer.py`, `src/llm.py`, `src/analysis.py`, `scripts/run.sh`, `scripts/backup_feeds.sh`, `templates/com.claude.ai-research-assistant.plist.j2`, `templates/notes/article.md.j2`, `templates/prompts/analysis-user.md.j2`.
 - Database: two nullable columns on `retry_queue` (`entry_content`, `published_at`), added by the existing startup migration. The old code ignores them.
 - launchd: the plist changes, so the iMac needs `setup --install-schedule` once after merge.
 - Cost: 403 retries add up to four page downloads per blocked entry and no model calls. Skipping analysis for already-filed URLs saves the model call.

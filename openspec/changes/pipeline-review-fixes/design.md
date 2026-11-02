@@ -40,7 +40,7 @@ Alternative: make 401, 402 and 403 transient, as the review suggested. Rejected:
 
 ### 3. Longer text wins; page metadata is kept
 
-`extract_article()` parses both sources and picks the one with more words, provided it reaches `min_words`. When the page was read but the feed text wins, the page's title, author, date and site name are merged with the feed text. Ties go to the page.
+`extract_article()` parses both sources and picks the one with more words, provided it reaches `min_words`. When the page was read but the feed text wins, the page's title, author, date and site name are merged with the feed text. Ties go to the page. The note and the prompt no longer say the page "could not be read" when the feed text is used; they say the page had less text or could not be read.
 
 Alternative: prefer the feed only when it is some multiple of the page length. Rejected: the threshold would be arbitrary, and the longer text is the better input in the cases seen.
 
@@ -68,7 +68,7 @@ The single-pass `str.replace` chain becomes one regex over the Moment tokens (`Y
 
 ### 9. `run.sh` keeps the pipeline's exit status but always runs the backup
 
-The pipeline call becomes `$UV run ai-research-assistant run || status=$?`. The backup runs next, and the script exits with the pipeline's status, so launchd still sees a failed run.
+The pipeline call becomes `$UV run ai-research-assistant run || status=$?`. The backup runs next, and the script exits with the pipeline's status, so launchd still sees a failed run. When the pipeline succeeded, a failed backup sets the exit status instead, so a broken backup is not silent.
 
 ### 10. Backup commits to `backup/feeds` without touching the checkout
 
