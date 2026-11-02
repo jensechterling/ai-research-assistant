@@ -573,3 +573,25 @@ def test_feed_text_note_does_not_claim_the_page_failed():
     text = render_note(_article(from_feed=True), _analysis(), TODAY)
 
     assert "Text taken from the feed (the page had less text or could not be read)." in text
+
+
+@pytest.mark.parametrize("frontmatter", ["created: 2024-02-30", "created: 0000-01-01", "a: " + "[" * 2000],
+                         ids=["invalid-day", "year-zero", "deep-nesting"])
+def test_index_survives_frontmatter_that_yaml_cannot_load(vault, frontmatter):
+    from src.vault_writer import VaultIndex
+
+    (vault / "Odd.md").write_text(f"---\n{frontmatter}\nsource: https://example.com/odd\n---\nbody")
+    _note(vault / "Good.md", "https://example.com/good")
+
+    index = VaultIndex.build(vault)
+
+    assert index.has_stem("Odd")
+    assert index.find_source("https://example.com/good") == vault / "Good.md"
+
+
+def test_templater_bracketed_text_is_kept_literally():
+    from src.vault_writer import _resolve_templater_dates
+
+    result = _resolve_templater_dates('<% tp.date.now("[Daily] YYYY-MM-DD [Week of] D MMM") %>', date(2026, 11, 2))
+
+    assert result == "Daily 2026-11-02 Week of 2 Nov"

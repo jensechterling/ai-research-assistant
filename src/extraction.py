@@ -1,5 +1,6 @@
 """Article text extraction without an LLM."""
 import json
+import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -15,6 +16,9 @@ PERMANENT_STATUSES = {401, 402, 404, 410, 451}
 MAX_PAGE_BYTES = 10_000_000
 PAGE_DEADLINE_SECONDS = 90
 PAGE_TYPES = ("text/", "application/xhtml+xml")
+# <meta charset="x"> or <meta http-equiv="Content-Type" content="text/html; charset=x">, in the page head
+_META_CHARSET = re.compile(rb"""<meta[^>]+charset\s*=\s*["']?([A-Za-z0-9_.:-]+)""", re.IGNORECASE)
+META_SCAN_BYTES = 4096
 
 
 @dataclass
@@ -76,12 +80,27 @@ def _fetch_page(entry: Entry, client: httpx.Client) -> tuple[dict | None, str | 
         permanent = response.status in PERMANENT_STATUSES
         return None, f"HTTP {response.status}", permanent
 
-    # Without a header charset, bytes let trafilatura detect the encoding, including <meta charset>.
-    html = response.text if response.charset else response.content
-    extracted = trafilatura.extract(html, output_format="json", with_metadata=True, url=entry.url)
+    extracted = trafilatura.extract(_page_html(response), output_format="json", with_metadata=True, url=entry.url)
     if not extracted:
         return None, None, True
     return json.loads(extracted), None, True
+
+
+def _page_html(response) -> str | bytes:
+    """Decode the page with the header charset, else the charset the page declares.
+
+    Without either, the raw bytes go to trafilatura, which guesses the encoding.
+    It does not read <meta charset> itself, so an ISO-8859-2 page would come out garbled.
+    """
+    if response.charset:
+        return response.text
+    declared = _META_CHARSET.search(response.content[:META_SCAN_BYTES])
+    if declared:
+        try:
+            return response.content.decode(declared.group(1).decode("ascii"), errors="replace")
+        except LookupError:
+            pass  # unknown charset name: let trafilatura guess
+    return response.content
 
 
 def _build(entry: Entry, data: dict, from_feed: bool, max_words: int) -> ExtractedArticle:

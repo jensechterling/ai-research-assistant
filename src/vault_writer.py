@@ -25,7 +25,8 @@ LOG_HEADER = "| Note | Evaluated | Category | Key Insight |"
 
 # Moment.js tokens used by Templater, longest first so "YYYY" wins over "YY". One regex pass
 # means a short token like "D" never matches inside text another token produced.
-_MOMENT_TOKEN = re.compile(r"YYYY|YY|MMMM|MMM|MM|M|Do|DD|D|dddd|ddd")
+# Text in [brackets] is literal, as in Moment.
+_MOMENT_TOKEN = re.compile(r"\[([^\]]*)\]|YYYY|YY|MMMM|MMM|MM|M|Do|DD|D|dddd|ddd")
 _MOMENT_FORMATS = {
     "YYYY": lambda d: f"{d.year:04d}",
     "YY": lambda d: f"{d.year % 100:02d}",
@@ -175,7 +176,7 @@ def _note_source(path: Path) -> str | None:
         return None
     try:
         frontmatter = yaml.safe_load(parts[0][4:])
-    except yaml.YAMLError:
+    except Exception:  # YAMLError, ValueError for dates like 2024-02-30, RecursionError: one odd note must not stop a run
         return None
     source = frontmatter.get("source") if isinstance(frontmatter, dict) else None
     return source if isinstance(source, str) else None
@@ -225,7 +226,9 @@ def _resolve_templater_dates(text: str, today: date) -> str:
     def replace(match: re.Match) -> str:
         fmt = match.group(1) or match.group(2) or "YYYY-MM-DD"
         day = today + timedelta(days=int(match.group(3) or 0))
-        return _MOMENT_TOKEN.sub(lambda token: _MOMENT_FORMATS[token.group(0)](day), fmt)
+        return _MOMENT_TOKEN.sub(
+            lambda token: token.group(1) if token.group(1) is not None else _MOMENT_FORMATS[token.group(0)](day), fmt
+        )
 
     return _TEMPLATER_DATE.sub(replace, text)
 

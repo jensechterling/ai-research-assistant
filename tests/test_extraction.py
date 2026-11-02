@@ -204,3 +204,34 @@ def test_page_wins_a_tie():
     result = _extract(_entry(content=_feed_html(300)), _client(body=_page(300)))
 
     assert result.from_feed is False
+
+
+@pytest.mark.parametrize("meta", ['<meta charset="iso-8859-2">',
+                                  '<meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-2">'],
+                         ids=["meta-charset", "http-equiv"])
+def test_charset_declared_in_page_is_used_for_central_european_text(meta):
+    sentence = "Zażółć gęślą jaźń."
+    html = (f"<html><head>{meta}<title>t</title></head><body><article>"
+            + "".join(f"<p>Akapit {i}: {sentence} {sentence} Dalsze słowa {i} o źdźble trawy.</p>" for i in range(15))
+            + "</article></body></html>")
+
+    def handler(request):
+        return httpx.Response(200, headers={"content-type": "text/html"}, content=html.encode("iso-8859-2"))
+
+    result = _extract(_entry(), httpx.Client(transport=httpx.MockTransport(handler)))
+
+    assert "Zażółć gęślą jaźń" in result.text
+
+
+def test_unknown_declared_charset_falls_back_to_detection():
+    sentence = "Grüße aus München, schöne Übung."
+    html = ('<html><head><meta charset="no-such-charset"><title>t</title></head><body><article>'
+            + "".join(f"<p>Absatz {i}: {sentence} Weitere Wörter {i} über Käse.</p>" for i in range(15))
+            + "</article></body></html>")
+
+    def handler(request):
+        return httpx.Response(200, headers={"content-type": "text/html"}, content=html.encode("utf-8"))
+
+    result = _extract(_entry(), httpx.Client(transport=httpx.MockTransport(handler)))
+
+    assert "Grüße aus München" in result.text

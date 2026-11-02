@@ -32,7 +32,9 @@ def _repo(tmp_path, branch: str = "feat/x"):
     _git(repo, "commit", "-q", "-m", "init")
     _git(repo, "remote", "add", "origin", str(remote))
     uv = tmp_path / "uv-stub"
-    uv.write_text('#!/bin/bash\nmkdir -p exports\nprintf "%s" "$FEEDS" > exports/feeds.opml\n')
+    # Stands in for `uv run ai-research-assistant feeds export --output PATH`
+    uv.write_text('#!/bin/bash\nout=exports/feeds.opml\nwhile [ $# -gt 0 ]; do [ "$1" = --output ] && out="$2"; shift; done\n'
+                  'mkdir -p "$(dirname "$out")"\nprintf "%s" "$FEEDS" > "$out"\n')
     uv.chmod(0o755)
     return repo, remote, uv
 
@@ -117,3 +119,47 @@ def test_master_checkout_is_not_committed_to(tmp_path):
     assert result.returncode == 0, result.stderr
     assert _git(repo, "rev-parse", "HEAD") == head_before
     assert _git(remote, "branch", "--list", "master") == ""
+
+
+def test_checkout_stays_clean_when_the_opml_is_tracked(tmp_path):
+    repo, remote, uv = _repo(tmp_path)
+    (repo / "exports").mkdir()
+    (repo / "exports" / "feeds.opml").write_text("<opml>old</opml>")
+    _git(repo, "add", "exports/feeds.opml")
+    _git(repo, "commit", "-q", "-m", "track opml")
+
+    result = _run(repo, uv, feeds="<opml>new</opml>")
+
+    assert result.returncode == 0, result.stderr
+    assert _git(repo, "status", "--porcelain", "--untracked-files=no") == ""
+    assert (repo / "exports" / "feeds.opml").read_text() == "<opml>old</opml>"
+    assert _git(remote, "show", f"{BRANCH}:exports/feeds.opml") == "<opml>new</opml>"
+
+
+def test_failed_push_is_retried_the_next_week_even_when_unchanged(tmp_path):
+    repo, remote, uv = _repo(tmp_path)
+    _git(repo, "remote", "set-url", "origin", str(tmp_path / "offline.git"))
+    first = _run(repo, uv)
+    _git(repo, "remote", "set-url", "origin", str(remote))
+
+    second = _run(repo, uv)
+
+    assert first.returncode != 0
+    assert second.returncode == 0, second.stderr
+    assert _git(remote, "show", f"{BRANCH}:exports/feeds.opml") == "<opml>a</opml>"
+
+
+def test_backup_continues_from_a_remote_that_is_ahead(tmp_path):
+    repo, remote, uv = _repo(tmp_path)
+    _run(repo, uv, feeds="<opml>a</opml>")
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", str(remote), str(other)], check=True, capture_output=True)
+    (other / "scripts").mkdir()
+    shutil.copy2(get_project_dir() / "scripts" / "backup_feeds.sh", other / "scripts")
+    assert _run(other, uv, feeds="<opml>b</opml>").returncode == 0  # a second machine backs up first
+
+    result = _run(repo, uv, feeds="<opml>c</opml>")
+
+    assert result.returncode == 0, result.stderr
+    assert _remote_commits(remote) == 3
+    assert _git(remote, "show", f"{BRANCH}:exports/feeds.opml") == "<opml>c</opml>"

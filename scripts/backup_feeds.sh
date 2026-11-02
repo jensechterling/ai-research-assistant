@@ -1,8 +1,12 @@
 #!/bin/bash
 # Weekly OPML backup of the feed list (Mondays).
-# Commits exports/feeds.opml onto the backup/feeds branch through a temporary index, so
-# the checked-out branch, its index and the working tree are never touched and nothing
-# is pushed to master. Pushes only when the file changed since the last backup.
+# Exports to a temporary file and commits it as exports/feeds.opml onto the backup/feeds
+# branch through a temporary index, so the checked-out branch, its index and the working
+# tree are never touched and nothing is pushed to master.
+#
+# Each run builds on the remote branch when it can be fetched, and pushes whenever the
+# remote is not at the local tip. A failed push or a backup from another machine is
+# therefore caught up the next Monday instead of being skipped or rejected for good.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -12,41 +16,53 @@ cd "$PROJECT_DIR"
 UV="${UV:-uv}"
 DAY_OF_WEEK="${DAY_OF_WEEK:-$(date +%u)}"
 BRANCH="backup/feeds"
+LOCAL_REF="refs/heads/$BRANCH"
+REMOTE_REF="refs/remotes/origin/$BRANCH"
 FILE="exports/feeds.opml"
 
 if [ "$DAY_OF_WEEK" -ne 1 ]; then
     exit 0
 fi
 
-$UV run ai-research-assistant feeds export
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
 
-# A machine without a local copy of the branch continues from the remote one, if any.
-if ! git rev-parse -q --verify "refs/heads/$BRANCH" >/dev/null; then
-    git fetch -q origin "$BRANCH:refs/heads/$BRANCH" 2>/dev/null || true
+$UV run ai-research-assistant feeds export --output "$WORK_DIR/feeds.opml"
+
+# Bring the remote branch in. A missing remote branch and an unreachable remote both
+# leave FETCHED=0; the push below tells them apart.
+FETCHED=0
+if git fetch -q origin "+$LOCAL_REF:$REMOTE_REF" 2>/dev/null; then
+    FETCHED=1
 fi
-PARENT="$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" || true)"
 
-# Build a tree holding only the OPML file, using an index of our own.
-TMP_INDEX="$(mktemp)"
-trap 'rm -f "$TMP_INDEX"' EXIT
-rm -f "$TMP_INDEX"  # git needs a valid index file or none at all
-BLOB="$(git hash-object -w "$FILE")"
-TREE="$(GIT_INDEX_FILE="$TMP_INDEX" bash -c \
+# Build on the remote tip when known, so this machine never diverges from it.
+PARENT="$(git rev-parse -q --verify "$REMOTE_REF^{commit}" || git rev-parse -q --verify "$LOCAL_REF^{commit}" || true)"
+
+# A tree holding only the OPML file, built in an index of our own.
+rm -f "$WORK_DIR/index"
+BLOB="$(git hash-object -w "$WORK_DIR/feeds.opml")"
+TREE="$(GIT_INDEX_FILE="$WORK_DIR/index" bash -c \
     'git update-index --add --cacheinfo "100644,$1,$2" && git write-tree' _ "$BLOB" "$FILE")"
 
 if [ -n "$PARENT" ] && [ "$(git rev-parse "$PARENT^{tree}")" = "$TREE" ]; then
+    COMMIT="$PARENT"
     echo "Weekly OPML backup: feeds.opml unchanged since the last backup"
+else
+    MESSAGE="Weekly OPML backup $(date +%Y-%m-%d)"
+    if [ -n "$PARENT" ]; then
+        COMMIT="$(git commit-tree "$TREE" -p "$PARENT" -m "$MESSAGE")"
+    else
+        COMMIT="$(git commit-tree "$TREE" -m "$MESSAGE")"
+    fi
+fi
+git update-ref "$LOCAL_REF" "$COMMIT"
+
+REMOTE_TIP="$(git rev-parse -q --verify "$REMOTE_REF^{commit}" || true)"
+if [ "$FETCHED" -eq 1 ] && [ "$REMOTE_TIP" = "$COMMIT" ]; then
     exit 0
 fi
 
-MESSAGE="Weekly OPML backup $(date +%Y-%m-%d)"
-if [ -n "$PARENT" ]; then
-    COMMIT="$(git commit-tree "$TREE" -p "$PARENT" -m "$MESSAGE")"
-    git update-ref "refs/heads/$BRANCH" "$COMMIT" "$PARENT"
-else
-    COMMIT="$(git commit-tree "$TREE" -m "$MESSAGE")"
-    git update-ref "refs/heads/$BRANCH" "$COMMIT"
-fi
-
-git push -q origin "refs/heads/$BRANCH:refs/heads/$BRANCH"
+git push -q origin "$LOCAL_REF:$LOCAL_REF"
+git update-ref "$REMOTE_REF" "$COMMIT"
 echo "Weekly OPML backup pushed to $BRANCH"
