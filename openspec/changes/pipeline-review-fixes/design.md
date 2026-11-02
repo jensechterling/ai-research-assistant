@@ -34,9 +34,9 @@ See proposal.md for why. Facts that shape the approach:
 
 Alternative: make 401, 402 and 403 transient, as the review suggested. Rejected: it adds retries that almost never succeed.
 
-### 2. Browser-style User-Agent that still names the tool
+### 2. User-Agent unchanged
 
-The default `feeds.user_agent` becomes a current desktop Chrome string with `AI-Research-Assistant/1.0` appended. Sites that block unknown agents get a browser-shaped string, and the tool stays identifiable in their logs. The setting stays overridable in `user.yaml`.
+`feeds.user_agent` stays `AI-Research-Assistant/1.0`. PR #2's probe found every live feed's article page returns HTTP 200 with it, and neither integration run had an extraction failure, so a browser-style string would fix no observed problem. Revisit if 403s show up in the run log.
 
 ### 3. Longer text wins; page metadata is kept
 
@@ -82,7 +82,6 @@ The plist template's PATH becomes `/opt/homebrew/bin:/usr/bin:/bin:/usr/local/bi
 
 ## Risks / Trade-offs
 
-- [The browser-style User-Agent may not get past Cloudflare, which also checks TLS and JavaScript] → Not verified. After a week on the iMac, compare the count of 403 failures in the run log with the week before.
 - [403 entries that never open stay in the queue for about 41 hours before being dropped] → That is the existing retry ceiling; the log shows each attempt.
 - [Feed text will win for most entries: PR #2's probe found full text in 10 of 11 live feeds, so page and feed lengths are often close and the winner can flip on a few words] → Page metadata is kept either way; the text differs mainly in boilerplate. Check `from_feed` in the first week's notes.
 - [The feed text can win while carrying newsletter footers or sponsor blocks] → Trafilatura already strips most of these from feed HTML; the note's collapsed original-text callout shows what was used.

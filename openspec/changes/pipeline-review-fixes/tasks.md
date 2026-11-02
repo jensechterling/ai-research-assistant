@@ -7,8 +7,6 @@ Every fix starts with a test that fails on the current code (test first), then t
 - [ ] 1.1 In `src/http_fetch.py`, expose the header charset (or `None`) on `FetchResult`; in `src/extraction.py`, pass `content` bytes to trafilatura when it is `None`. Done when a test serving an ISO-8859-1 page with `<meta charset="iso-8859-1">` and no header charset gets `Grüße aus München` back, and fails on the old code.
 - [ ] 1.2 Move 403 out of `PERMANENT_STATUSES`. Done when `tests/test_extraction.py` shows 403 with short feed text raises a transient `ExtractionError`, and 401, 402, 404, 410 and 451 stay permanent.
 - [ ] 1.3 Choose the text with more words (page wins ties), keeping page metadata when the feed text wins. Done when tests cover the paywall-teaser scenario (250-word page, 3,000-word feed: feed text, page title and author, `from_feed=True`) and the readable-article scenario (page longer: page text).
-- [ ] 1.4 Change `feeds.user_agent` in `config/defaults.yaml` to a desktop Chrome string ending in `AI-Research-Assistant/1.0`. Done when the config test asserts the new default and that `user.yaml` still overrides it.
-
 ## 2. Retry entries keep their feed text
 
 - [ ] 2.1 Add nullable `entry_content` and `published_at` columns to `retry_queue` in the startup migration in `src/database.py`. Done when a test opens a database created with the old schema and finds both columns, with existing rows intact.

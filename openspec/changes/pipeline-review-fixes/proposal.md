@@ -9,7 +9,6 @@ PR #2's own review accepted three of the ten as rare or harmless (`openspec/chan
 ## What Changes
 
 - An HTTP 403 page response becomes a transient failure: it is retried, not marked "not extractable" at once. Cloudflare, Medium and Substack often answer 403 to an unknown client, and that block is often temporary. 401, 402, 404, 410 and 451 stay permanent.
-- The default `feeds.user_agent` changes to a browser-style string that still names the tool, to cut the bot blocks behind those 403s.
 - Extraction uses whichever of page text and feed text has more words, instead of the page whenever it reaches `extraction.min_words`. A 250-word paywall teaser no longer beats a 3,000-word `content:encoded`.
 - Retry-queue rows store the entry's feed text and publication date, so a retry keeps its feed-text fallback after the item has left the feed.
 - When a knowledge-base note with the same `source` URL already exists, the entry is recorded as processed with that note. It is not analyzed again and the note is not overwritten. **BREAKING** for the old "same source already written: that note is replaced" behavior.
@@ -36,7 +35,7 @@ None.
 
 ## Impact
 
-- Code: `src/extraction.py`, `src/http_fetch.py`, `src/pipeline.py`, `src/processor.py`, `src/database.py`, `src/vault_writer.py`, `scripts/run.sh`, `scripts/backup_feeds.sh`, `templates/com.claude.ai-research-assistant.plist.j2`, `config/defaults.yaml`.
+- Code: `src/extraction.py`, `src/http_fetch.py`, `src/pipeline.py`, `src/processor.py`, `src/database.py`, `src/vault_writer.py`, `scripts/run.sh`, `scripts/backup_feeds.sh`, `templates/com.claude.ai-research-assistant.plist.j2`.
 - Database: two nullable columns on `retry_queue` (`entry_content`, `published_at`), added by the existing startup migration. The old code ignores them.
 - launchd: the plist changes, so the iMac needs `setup --install-schedule` once after merge.
 - Cost: 403 retries add up to four page downloads per blocked entry and no model calls. Skipping analysis for already-filed URLs saves the model call.
