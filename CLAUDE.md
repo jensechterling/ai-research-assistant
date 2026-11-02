@@ -17,7 +17,7 @@ uv run pytest tests/test_database.py::test_database_creates_tables -v
 
 # Run pipeline
 uv run ai-research-assistant run
-uv run ai-research-assistant run --limit 5    # test with fewer items
+uv run ai-research-assistant run --limit 5    # test with fewer items (paid API calls, writes into the real vault)
 uv run ai-research-assistant run --dry-run    # preview only
 
 # Feed management
@@ -31,6 +31,13 @@ uv run ai-research-assistant setup
 # Lint
 uv run ruff check src/ tests/
 ```
+
+## Gotchas
+
+- `test_config.py::test_load_config_returns_defaults` fails whenever `config/user.yaml` exists (the main checkout); run the suite in a worktree, which has none
+- Worktrees lack the gitignored `config/user.yaml`, `data/pipeline.db` and `.env`; for an integration run, copy them in with `vault.path` pointing at a copy of the vault's Markdown (`rsync -a --include='*/' --include='*.md' --exclude='.*' --exclude='*'`), never the real vault, and delete them afterwards
+- On the scheduled machine keep the Melious key in `.env`: launchd can find the Keychain locked
+- GitHub issues are disabled for this repo; record follow-ups in an OpenSpec change
 
 ## Architecture
 
