@@ -99,7 +99,8 @@
   - the daily note and log rows are correct
   - the cost is shown
   - the notes have been compared with three March notes from the same feeds, with the verdict recorded for the PR description
-- [ ] 9.2 On the iMac, follow design.md "Migration Plan" steps 1 to 5. Done when five entries are processed into the real vault with no warnings in the log, and the next 06:00 run is confirmed complete in `~/.claude/logs/ai-research-assistant.log`.
+- [x] 9.2 On the iMac, follow design.md "Migration Plan" steps 1 to 5. Done when five entries are processed into the real vault with no warnings in the log, and the next 06:00 run is confirmed complete in `~/.claude/logs/ai-research-assistant.log`.
+  - Confirmed 2026-11-02. Steps 1 to 5: 5 entries became notes in the real vault, EUR 0.02, no warnings. The scheduled run was confirmed by triggering the launchd job with `launchctl kickstart`, running the #4 code: 61 notes, 7 permanent skips (short posts), 0 failures, no warnings, EUR 0.18, exit status 0, and the Monday backup pushed `backup/feeds`.
 
 ## Workflow follow-up
 
