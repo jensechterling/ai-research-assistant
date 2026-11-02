@@ -1,0 +1,48 @@
+# Tasks
+
+Every fix starts with a test that fails on the current code (test first), then the change that makes it pass.
+
+## 1. Page download and extraction
+
+- [x] 1.1 In `src/http_fetch.py`, expose the header charset (or `None`) on `FetchResult`; in `src/extraction.py`, decode with the charset the page declares when the header names none, else pass `content` bytes to trafilatura. Done when tests serving ISO-8859-1 and ISO-8859-2 pages with `<meta charset>` or an `http-equiv` charset and no header charset keep their accented text, an unknown declared charset falls back to detection, and the ISO-8859-1 test fails on the old code.
+- [x] 1.2 Move 403 out of `PERMANENT_STATUSES`. Done when `tests/test_extraction.py` shows 403 with short feed text raises a transient `ExtractionError`, and 401, 402, 404, 410 and 451 stay permanent.
+- [x] 1.3 Choose the text with more words (page wins ties), keeping page metadata when the feed text wins, and reword the feed-text line in the note and prompt templates. Done when tests cover the paywall-teaser scenario (250-word page, 3,000-word feed: feed text, page title and author, `from_feed=True`) and the readable-article scenario (page longer: page text).
+## 2. Retry entries keep their feed text
+
+- [x] 2.1 Add nullable `entry_content` and `published_at` columns to `retry_queue` in the startup migration in `src/database.py`. Done when a test opens a database created with the old schema and finds both columns, with existing rows intact.
+- [x] 2.2 Store both in `add_to_retry_queue()`, never replacing stored content with an empty value on re-queue. Done when tests cover first queueing, re-queueing with content, and re-queueing with empty content (stored text kept).
+- [x] 2.3 Rebuild retry entries in `_select_entries()` from the stored columns, and pass the entry's content and date when queueing. Done when pipeline tests show a failed entry queued with its feed text and date, a retry that left its feed handed to the processor with that stored text and date, and a row with NULL content still giving empty content; `test_blocked_page_is_rescued_by_feed_text` covers the 403-plus-feed-text extraction step.
+
+## 3. Vault index: same source and unique filenames
+
+- [x] 3.1 Add `VaultIndex` to `src/vault_writer.py`: one walk of the vault skipping hidden folders, a `source → path` map from frontmatter, lower-cased stems. Done when tests cover notes without frontmatter, a non-string `source`, a hidden folder that is skipped, and a case-only stem difference.
+- [x] 3.2 Check the index in `EntryProcessor.process()` before extraction; on a hit, return `ProcessingResult(success=True, existing=True, ...)` with the existing path, zero cost and no download, write or bookkeeping. Done when the clipped-note scenario test shows the note's bytes unchanged and no extract or analyze call.
+- [x] 3.3 Make `write_note()` pick the first stem free in the index and add the new stem and `source → path` pair to it; remove the overwrite-on-same-source branch. Done when the same-title-in-another-folder test writes `Weekly-Roundup-2.md` and its Daily Dose and log links use that stem.
+- [x] 3.4 Build the index once in `build_processor()` and pass it in; in `_process_entries()`, handle `existing` before the success branch (`mark_processed` with the existing path, remove from the retry queue, `[EXISTS]` log line, no change to `processed`, `retried`, `created_notes` or `analysis_worked`). Done when a processor test shows two entries for one URL make one model call and one note, and pipeline tests show the "Processed 3" scenario from the entry-processing spec; and an existing-note match followed by 3 analysis failures still stops the run.
+
+## 4. Daily-note Templater dates
+
+- [x] 4.1 Replace the token chain in `_resolve_templater_dates()` with a one-pass tokenizer (`YYYY YY MMMM MMM MM M Do DD D dddd ddd`) and accept an optional integer day offset. Done when tests give `2026-11-01` and `2026-11-03` for offsets -1 and 1, `Monday, November 2nd 2026` for `dddd, MMMM Do YYYY`, `2.11.2026` for `D.M.YYYY`, keep `[bracketed]` text literally, and leave other `<% %>` commands untouched.
+
+## 5. Cost accounting
+
+- [x] 5.1 Catch any `Exception` from the write step in `process()` and return a vault failure carrying the analysis cost. Done when a test whose writer raises `UnicodeDecodeError` gets a result with the analysis cost, and the run total includes it.
+- [x] 5.2 Add `cost_eur` to `FatalRunError`; set it in `analyze()` when a repair or truncation retry hits an account error after a paid request, and add it to the run total in the pipeline before re-raising. Done when an analysis test with a paid first request and a 402 on the repair turn raises with that cost, and a pipeline test shows the stopped run's cost includes it.
+
+## 6. Scripts and launchd
+
+- [x] 6.1 In `scripts/run.sh`, capture the pipeline's exit status, run `backup_feeds.sh`, then exit with the pipeline's status, or the backup's when the pipeline succeeded. Done when `tests/test_run_script.py` shows the backup ran after a failing pipeline stub and the script exits non-zero, and a failing backup after a successful pipeline also exits non-zero.
+- [x] 6.2 Rewrite `scripts/backup_feeds.sh` to export to a temporary file, commit it as `exports/feeds.opml` onto `backup/feeds` with a temporary index on top of the fetched remote tip, push whenever the remote is not at the local tip, and drop the master-only guard. Update `tests/test_backup_script.py` with a bare remote. Done when tests show: the first Monday creates `backup/feeds` with only that file and pushes it; an unchanged export makes no commit and no push; a failed push is retried the next Monday even when unchanged; a remote advanced by another machine is built on; HEAD, the index, staged changes and a tracked `exports/feeds.opml` on the checked-out branch are untouched; other weekdays do nothing.
+- [x] 6.3 Change the PATH in `templates/com.claude.ai-research-assistant.plist.j2` to `/opt/homebrew/bin:/usr/bin:/bin:/usr/local/bin`. Done when the template-rendering test asserts the new order.
+
+## 7. Documentation and integration
+
+- [x] 7.1 Update `CLAUDE.md` (core flow: same-source check before analysis, 403 transient), `README.md` (weekly backup goes to `backup/feeds`) and add a `CHANGELOG.md` entry. Done when each statement matches the code.
+- [x] 7.2 Run `uv run pytest tests/ -v`, `uv run ruff check src/ tests/` and `openspec validate pipeline-review-fixes --strict`. Done when all three pass.
+- [x] 7.3 Run `run --dry-run` from the worktree against a copy of the iMac database and vault (Markdown files only), then a full run on the copy. Done (2026-11-02): 67 entries over two runs (8, then 59), giving 60 notes and 7 permanent skips (short posts), 0 failures, 0 warnings, EUR 0.17; the 24 queued URLs that already had notes are February rows already marked processed, so the same-source check was exercised by calling the real processor on the copy with a clipped note's URL: matched, no download or model call, note bytes unchanged. No entry was newly queued, so stored retry content is covered by tests only.
+
+## Workflow follow-up
+
+- PR #3 (archive of `api-pipeline`) merges first; rebase this branch onto master afterwards.
+- Open a PR only with the user's consent; merge after review.
+- After merge, follow design.md "Migration Plan" on the iMac, then archive with `/opsx:archive`.

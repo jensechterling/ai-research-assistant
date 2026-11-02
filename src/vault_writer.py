@@ -3,7 +3,7 @@ import os
 import re
 import stat
 import tempfile
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -23,12 +23,27 @@ MAX_FILENAME_LENGTH = 80
 DAILY_DOSE_HEADING = "Daily Dose of Know-How"
 LOG_HEADER = "| Note | Evaluated | Category | Key Insight |"
 
-# Moment.js tokens used by Templater, longest first so "YYYY" wins over "YY"
-_MOMENT_TOKENS = [
-    ("YYYY", "%Y"), ("YY", "%y"), ("MMMM", "%B"), ("MMM", "%b"), ("MM", "%m"),
-    ("dddd", "%A"), ("ddd", "%a"), ("DD", "%d"),
-]
-_TEMPLATER_DATE = re.compile(r'<%\s*tp\.date\.now\(\s*(?:"([^"]*)"|\'([^\']*)\')?\s*\)\s*%>')
+# Moment.js tokens used by Templater, longest first so "YYYY" wins over "YY". One regex pass
+# means a short token like "D" never matches inside text another token produced.
+# Text in [brackets] is literal, as in Moment.
+_MOMENT_TOKEN = re.compile(r"\[([^\]]*)\]|YYYY|YY|MMMM|MMM|MM|M|Do|DD|D|dddd|ddd")
+_MOMENT_FORMATS = {
+    "YYYY": lambda d: f"{d.year:04d}",
+    "YY": lambda d: f"{d.year % 100:02d}",
+    "MMMM": lambda d: d.strftime("%B"),
+    "MMM": lambda d: d.strftime("%b"),
+    "MM": lambda d: f"{d.month:02d}",
+    "M": lambda d: str(d.month),
+    "Do": lambda d: _ordinal(d.day),
+    "DD": lambda d: f"{d.day:02d}",
+    "D": lambda d: str(d.day),
+    "dddd": lambda d: d.strftime("%A"),
+    "ddd": lambda d: d.strftime("%a"),
+}
+# tp.date.now(), tp.date.now("FORMAT") or tp.date.now("FORMAT", N) with N an integer day offset
+_TEMPLATER_DATE = re.compile(
+    r'<%\s*tp\.date\.now\(\s*(?:(?:"([^"]*)"|\'([^\']*)\')\s*(?:,\s*(-?\d+)\s*)?)?\)\s*%>'
+)
 
 
 # --- note -----------------------------------------------------------------
@@ -58,21 +73,29 @@ def render_note(article: ExtractedArticle, analysis: Analysis, today: date) -> s
     return _defuse(f"---\n{header}---\n\n{body}")
 
 
-def write_note(vault: Path, config: dict, article: ExtractedArticle, analysis: Analysis, today: date) -> Path:
-    """File the note into the knowledge base and return its path."""
+def write_note(vault: Path, config: dict, article: ExtractedArticle, analysis: Analysis, today: date,
+               index: "VaultIndex | None" = None) -> Path:
+    """File the note into the knowledge base under a filename unused anywhere in the vault.
+
+    An existing note is never overwritten. The new note is added to the index, so a later
+    entry in the same run sees its name and source.
+    """
+    if index is None:
+        index = VaultIndex.build(vault)
     folders = config["folders"]
     kb_path = vault / folders["knowledge_base"]
     folder = _resolve_folder(kb_path, folders["knowledge_base"], analysis.kb_folder, folders["kb_fallback"])
     folder.mkdir(parents=True, exist_ok=True)
 
-    stem = sanitize_filename(article.title)
-    path = folder / f"{stem}.md"
-    suffix = 2
-    while path.exists() and _note_source(path) != article.url:
-        path = folder / f"{stem}-{suffix}.md"
+    base = sanitize_filename(article.title)
+    stem, suffix = base, 2
+    while index.has_stem(stem) or (folder / f"{stem}.md").exists():
+        stem = f"{base}-{suffix}"
         suffix += 1
+    path = folder / f"{stem}.md"
 
     atomic_write(path, render_note(article, analysis, today))
+    index.add(path, article.url)
     return path
 
 
@@ -99,15 +122,64 @@ def _resolve_folder(kb_path: Path, kb_name: str, requested: str, fallback: str) 
     return kb_path / name
 
 
+# --- vault index ----------------------------------------------------------
+
+FRONTMATTER_READ_LIMIT = 65_536  # frontmatter sits at the top; no need to read whole notes
+
+
+class VaultIndex:
+    """Source URLs and filename stems of every note in the vault, built once per run.
+
+    Links to notes use the bare filename and Obsidian resolves them vault-wide and
+    case-insensitively, so stems are compared lower-cased across the whole vault.
+    Hidden folders (.obsidian, .trash) are skipped.
+    """
+
+    def __init__(self) -> None:
+        self._sources: dict[str, Path] = {}
+        self._stems: set[str] = set()
+
+    @classmethod
+    def build(cls, vault: Path) -> "VaultIndex":
+        index = cls()
+        for root, dirs, files in os.walk(vault):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            for name in files:
+                if name.endswith(".md") and not name.startswith("."):
+                    path = Path(root) / name
+                    index.add(path, _note_source(path))
+        return index
+
+    def add(self, path: Path, source: str | None) -> None:
+        self._stems.add(path.stem.lower())
+        if source and source not in self._sources:
+            self._sources[source] = path
+
+    def find_source(self, url: str) -> Path | None:
+        return self._sources.get(url)
+
+    def has_stem(self, stem: str) -> bool:
+        return stem.lower() in self._stems
+
+
 def _note_source(path: Path) -> str | None:
-    text = path.read_text()
-    if not text.startswith("---\n"):
+    """The note's frontmatter `source` when it is a string, else None."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            head = f.read(FRONTMATTER_READ_LIMIT)
+    except OSError:
+        return None
+    if not head.startswith("---\n"):
+        return None
+    parts = head.split("\n---", 1)
+    if len(parts) < 2:
         return None
     try:
-        frontmatter = yaml.safe_load(text.split("---\n", 2)[1]) or {}
-    except (yaml.YAMLError, IndexError):
+        frontmatter = yaml.safe_load(parts[0][4:])
+    except Exception:  # YAMLError, ValueError for dates like 2024-02-30, RecursionError: one odd note must not stop a run
         return None
-    return frontmatter.get("source") if isinstance(frontmatter, dict) else None
+    source = frontmatter.get("source") if isinstance(frontmatter, dict) else None
+    return source if isinstance(source, str) else None
 
 
 # --- daily note -----------------------------------------------------------
@@ -153,11 +225,17 @@ def append_daily_dose(vault: Path, config: dict, *, link_stem: str, title: str, 
 def _resolve_templater_dates(text: str, today: date) -> str:
     def replace(match: re.Match) -> str:
         fmt = match.group(1) or match.group(2) or "YYYY-MM-DD"
-        for token, directive in _MOMENT_TOKENS:
-            fmt = fmt.replace(token, directive)
-        return today.strftime(fmt)
+        day = today + timedelta(days=int(match.group(3) or 0))
+        return _MOMENT_TOKEN.sub(
+            lambda token: token.group(1) if token.group(1) is not None else _MOMENT_FORMATS[token.group(0)](day), fmt
+        )
 
     return _TEMPLATER_DATE.sub(replace, text)
+
+
+def _ordinal(n: int) -> str:
+    suffix = "th" if 11 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
 
 
 # --- evaluation log -------------------------------------------------------

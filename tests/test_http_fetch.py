@@ -85,3 +85,15 @@ def test_network_error_is_transient():
 
     assert not exc.value.permanent
     assert "ConnectError" in str(exc.value)
+
+
+def test_charset_from_header_is_exposed():
+    result = fetch(_client(b"x", content_type="text/html; charset=ISO-8859-1"), URL, max_bytes=1000, deadline_seconds=60)
+
+    assert result.charset == "iso-8859-1"
+
+
+def test_charset_is_none_without_header_charset():
+    result = fetch(_client(b"x", content_type="text/html"), URL, max_bytes=1000, deadline_seconds=60)
+
+    assert result.charset is None

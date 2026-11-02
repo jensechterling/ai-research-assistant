@@ -350,3 +350,94 @@ def test_crash_sends_run_stopped_notification(db):
         _run(db, FakeFeeds(error=RuntimeError("disk full")), FakeProcessor(), notes=notes)
 
     assert "disk full" in notes[0].stopped_reason
+
+
+def test_transient_failure_is_queued_with_feed_content_and_date(db):
+    entry = _entry("a")
+    processor = FakeProcessor({"a": ProcessingResult(False, step="extraction", error="extraction: transient: HTTP 503")})
+
+    _run(db, FakeFeeds([entry]), processor)
+
+    row = db.execute("SELECT entry_content, published_at FROM retry_queue WHERE entry_guid = 'a'").fetchone()
+    assert row["entry_content"] == "feed text"
+    assert datetime.fromisoformat(row["published_at"]) == entry.published_at
+
+
+def test_retry_that_left_the_feed_keeps_stored_content_and_date(db):
+    entry = _entry("a", days_old=30)
+    db.add_to_retry_queue(entry.guid, entry.feed_id, entry.url, entry.title, entry.category, "HTTP 403",
+                          entry_content="<p>stored full text</p>", published_at=entry.published_at)
+    db.execute("UPDATE retry_queue SET next_retry_at = datetime('now', '-1 hour')")
+    db.commit()
+    processor = FakeProcessor()
+
+    result = _run(db, FakeFeeds([]), processor)
+
+    assert processor.seen[0].content == "<p>stored full text</p>"
+    assert processor.seen[0].published_at == entry.published_at
+    assert result.retried == 1
+
+
+def test_retry_queued_without_content_has_empty_content(db):
+    entry = _entry("a")
+    _queue(db, entry, due=True)
+    processor = FakeProcessor()
+
+    _run(db, FakeFeeds([]), processor)
+
+    assert processor.seen[0].content == ""
+    assert processor.seen[0].published_at is None
+
+
+def _existing(guid: str) -> ProcessingResult:
+    return ProcessingResult(True, note_path=Path(f"/vault/clipped-{guid}.md"), existing=True)
+
+
+def test_entry_matched_to_existing_note_is_stored_but_not_counted(db, caplog):
+    from src.pipeline import notification_text
+
+    entries = [_entry(g) for g in "abcd"]
+    processor = FakeProcessor({"a": _existing("a")})
+
+    with caplog.at_level("INFO"):
+        result = _run(db, FakeFeeds(entries), processor, verbose=True)
+
+    assert result.processed == 3
+    assert len(result.created_notes) == 3
+    assert all(db.is_processed(g) for g in "abcd")
+    row = db.execute("SELECT note_path FROM processed_entries WHERE entry_guid = 'a'").fetchone()
+    assert row["note_path"] == "/vault/clipped-a.md"
+    assert notification_text(result)[1].startswith("Processed 3")
+    assert "[EXISTS] Title a" in caplog.text
+
+
+def test_retry_matched_to_existing_note_leaves_queue_without_counting_as_retried(db):
+    entry = _entry("a")
+    _queue(db, entry, due=True)
+
+    result = _run(db, FakeFeeds([entry]), FakeProcessor({"a": _existing("a")}))
+
+    assert db.get_queued_guids() == set()
+    assert db.is_processed("a")
+    assert result.retried == 0
+
+
+def test_existing_note_match_does_not_count_as_analysis_working(db):
+    entries = [_entry(f"e{i}") for i in range(5)]
+    outcomes = {e.guid: _analysis_failure() for e in entries[1:]}
+    outcomes["e0"] = _existing("e0")
+
+    result = _run(db, FakeFeeds(entries), FakeProcessor(outcomes))
+
+    assert "3 analyses failed in a row" in result.stopped_reason
+
+
+def test_fatal_error_adds_its_spent_cost_to_the_run_total(db):
+    error = FatalRunError("Melious API rejected the request (HTTP 402)")
+    error.cost_eur = 0.004
+    processor = FakeProcessor({"b": error})
+
+    result = _run(db, FakeFeeds([_entry("a"), _entry("b")]), processor)
+
+    assert result.stopped_reason is not None
+    assert result.cost_eur == pytest.approx(0.014)

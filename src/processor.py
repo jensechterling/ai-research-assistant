@@ -7,7 +7,7 @@ from pathlib import Path
 from src.analysis import AnalysisContext, AnalysisError, analyze
 from src.extraction import ExtractionError, extract_article
 from src.models import Entry
-from src.vault_writer import append_daily_dose, upsert_evaluation_log, write_note
+from src.vault_writer import VaultIndex, append_daily_dose, upsert_evaluation_log, write_note
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,7 @@ class ProcessingResult:
     error: str | None = None
     permanent: bool = False
     cost_eur: float = 0.0
+    existing: bool = False  # a note with the entry's URL as source was already in the vault
 
 
 class EntryProcessor:
@@ -29,7 +30,8 @@ class EntryProcessor:
 
     def __init__(self, config: dict, vault_path: Path, context: AnalysisContext, llm_client, http_client,
                  today: date, extract=extract_article, analyze=analyze, write=write_note,
-                 daily_dose=append_daily_dose, evaluation_log=upsert_evaluation_log):
+                 daily_dose=append_daily_dose, evaluation_log=upsert_evaluation_log,
+                 index: VaultIndex | None = None):
         self._config = config
         self._vault = vault_path
         self._context = context
@@ -41,8 +43,15 @@ class EntryProcessor:
         self._write = write
         self._daily_dose = daily_dose
         self._evaluation_log = evaluation_log
+        self._index = index
 
     def process(self, entry: Entry) -> ProcessingResult:
+        # A note for this URL already exists (clipped by hand, or filed from another feed):
+        # reuse it, so nothing is downloaded, paid for or overwritten.
+        existing = self._index.find_source(entry.url) if self._index is not None else None
+        if existing is not None:
+            return ProcessingResult(True, note_path=existing, existing=True)
+
         extraction = self._config["extraction"]
         try:
             article = self._extract(entry, self._http, extraction["min_words"], extraction["max_words"])
@@ -56,9 +65,11 @@ class EntryProcessor:
         cost = result.cost_eur
 
         try:
-            path = self._write(self._vault, self._config, article, result.analysis, self._today)
+            path = self._write(self._vault, self._config, article, result.analysis, self._today, index=self._index)
         except OSError as e:
             return ProcessingResult(False, step="vault", error=f"vault: {e}", cost_eur=cost)
+        except Exception as e:  # the analysis is paid for, so its cost must reach the run total
+            return ProcessingResult(False, step="vault", error=f"vault: {type(e).__name__}: {e}", cost_eur=cost)
         if not path.is_file():
             return ProcessingResult(False, step="vault", error=f"vault: note not found after write: {path}",
                                     cost_eur=cost)

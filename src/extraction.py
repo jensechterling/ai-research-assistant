@@ -1,5 +1,6 @@
 """Article text extraction without an LLM."""
 import json
+import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -9,11 +10,15 @@ import trafilatura
 from src.http_fetch import FetchError, fetch
 from src.models import Entry
 
-# HTTP statuses that mean the page itself will not become readable on retry
-PERMANENT_STATUSES = {401, 402, 403, 404, 410, 451}
+# HTTP statuses that mean the page itself will not become readable on retry.
+# 403 is left out: bot blocks (Cloudflare and similar) are often lifted later.
+PERMANENT_STATUSES = {401, 402, 404, 410, 451}
 MAX_PAGE_BYTES = 10_000_000
 PAGE_DEADLINE_SECONDS = 90
 PAGE_TYPES = ("text/", "application/xhtml+xml")
+# <meta charset="x"> or <meta http-equiv="Content-Type" content="text/html; charset=x">, in the page head
+_META_CHARSET = re.compile(rb"""<meta[^>]+charset\s*=\s*["']?([A-Za-z0-9_.:-]+)""", re.IGNORECASE)
+META_SCAN_BYTES = 4096
 
 
 @dataclass
@@ -41,14 +46,21 @@ class ExtractionError(Exception):
 
 
 def extract_article(entry: Entry, client: httpx.Client, min_words: int, max_words: int) -> ExtractedArticle:
-    """Extract the article for an entry from its page, falling back to the feed text."""
-    page, page_problem, page_permanent = _fetch_page(entry, client)
-    if page is not None and _word_count(page["text"]) >= min_words:
-        return _build(entry, page, from_feed=False, max_words=max_words)
+    """Extract the article for an entry, using whichever of page and feed text is longer.
 
+    A paywall teaser can pass min_words while the feed carries the full post, so the
+    page does not win just by being long enough. The page wins ties, and its metadata
+    is kept when the feed text is used.
+    """
+    page, page_problem, page_permanent = _fetch_page(entry, client)
+    page_words = _word_count(page["text"]) if page is not None else 0
     feed_text = _html_to_text(entry.content)
-    if _word_count(feed_text) >= min_words:
-        return _build(entry, {"text": feed_text}, from_feed=True, max_words=max_words)
+    feed_words = _word_count(feed_text)
+
+    if feed_words >= min_words and feed_words > page_words:
+        return _build(entry, {**(page or {}), "text": feed_text}, from_feed=True, max_words=max_words)
+    if page is not None and page_words >= min_words:
+        return _build(entry, page, from_feed=False, max_words=max_words)
 
     if page_problem and not page_permanent:
         raise ExtractionError(f"transient: {page_problem}", permanent=False)
@@ -68,12 +80,27 @@ def _fetch_page(entry: Entry, client: httpx.Client) -> tuple[dict | None, str | 
         permanent = response.status in PERMANENT_STATUSES
         return None, f"HTTP {response.status}", permanent
 
-    extracted = trafilatura.extract(
-        response.text, output_format="json", with_metadata=True, url=entry.url
-    )
+    extracted = trafilatura.extract(_page_html(response), output_format="json", with_metadata=True, url=entry.url)
     if not extracted:
         return None, None, True
     return json.loads(extracted), None, True
+
+
+def _page_html(response) -> str | bytes:
+    """Decode the page with the header charset, else the charset the page declares.
+
+    Without either, the raw bytes go to trafilatura, which guesses the encoding.
+    It does not read <meta charset> itself, so an ISO-8859-2 page would come out garbled.
+    """
+    if response.charset:
+        return response.text
+    declared = _META_CHARSET.search(response.content[:META_SCAN_BYTES])
+    if declared:
+        try:
+            return response.content.decode(declared.group(1).decode("ascii"), errors="replace")
+        except LookupError:
+            pass  # unknown charset name: let trafilatura guess
+    return response.content
 
 
 def _build(entry: Entry, data: dict, from_feed: bool, max_words: int) -> ExtractedArticle:

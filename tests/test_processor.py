@@ -56,7 +56,7 @@ class Recorder:
             raise self.analysis_error
         return AnalysisResult(ANALYSIS, cost_eur=0.003)
 
-    def write(self, vault, config, article, analysis, today):
+    def write(self, vault, config, article, analysis, today, **kwargs):
         self.calls.append("write")
         if self.write_error:
             raise self.write_error
@@ -77,12 +77,12 @@ class Recorder:
             raise self.log_error
 
 
-def _processor(steps: Recorder) -> EntryProcessor:
+def _processor(steps: Recorder, index=None) -> EntryProcessor:
     return EntryProcessor(
         config=CONFIG, vault_path=steps.vault, context=object(), llm_client=object(),
         http_client=object(), today=TODAY,
         extract=steps.extract, analyze=steps.analyze, write=steps.write,
-        daily_dose=steps.daily, evaluation_log=steps.log,
+        daily_dose=steps.daily, evaluation_log=steps.log, index=index,
     )
 
 
@@ -171,3 +171,56 @@ def test_bookkeeping_failure_still_counts_as_success(tmp_path, caplog):
     assert result.success is True
     assert "locked" in caplog.text
     assert "disk" in caplog.text
+
+
+def test_existing_note_for_the_url_is_reused_without_download_or_analysis(tmp_path):
+    from src.vault_writer import VaultIndex
+
+    clipped = tmp_path / "2 Know-how" / "Product" / "My-Clipping.md"
+    clipped.parent.mkdir(parents=True)
+    original = f"---\nsource: {ENTRY.url}\n---\nMy annotations.\n".encode()
+    clipped.write_bytes(original)
+    steps = Recorder(tmp_path)
+
+    result = _processor(steps, index=VaultIndex.build(tmp_path)).process(ENTRY)
+
+    assert result.success is True
+    assert result.existing is True
+    assert result.note_path == clipped
+    assert result.cost_eur == 0
+    assert steps.calls == []
+    assert clipped.read_bytes() == original
+
+
+def test_second_entry_for_the_same_url_in_a_run_reuses_the_first_note(tmp_path):
+    from dataclasses import replace
+
+    from src.vault_writer import VaultIndex, write_note
+
+    config = {**CONFIG, "folders": {"knowledge_base": "2 Know-how", "kb_fallback": "Misc"}}
+    (tmp_path / "2 Know-how").mkdir()
+    steps = Recorder(tmp_path)
+    processor = EntryProcessor(
+        config=config, vault_path=tmp_path, context=object(), llm_client=object(), http_client=object(),
+        today=TODAY, extract=steps.extract, analyze=steps.analyze, write=write_note,
+        daily_dose=steps.daily, evaluation_log=steps.log, index=VaultIndex.build(tmp_path),
+    )
+
+    first = processor.process(ENTRY)
+    second = processor.process(replace(ENTRY, guid="g2"))
+
+    assert steps.calls.count("analyze") == 1
+    assert second.existing is True
+    assert second.note_path == first.note_path
+    assert len(list((tmp_path / "2 Know-how").rglob("*.md"))) == 1
+
+
+def test_unexpected_write_error_is_a_vault_failure_carrying_the_analysis_cost(tmp_path):
+    steps = Recorder(tmp_path, write_error=UnicodeDecodeError("utf-8", b"\xfc", 0, 1, "invalid start byte"))
+
+    result = _processor(steps).process(ENTRY)
+
+    assert result.success is False
+    assert result.step == "vault"
+    assert result.cost_eur == pytest.approx(0.003)
+    assert "UnicodeDecodeError" in result.error

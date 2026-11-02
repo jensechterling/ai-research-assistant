@@ -214,3 +214,77 @@ def test_get_queued_guids_includes_entries_not_yet_due():
 
         assert db.get_queued_guids() == {"g1", "g2"}
         assert db.get_retry_candidates() == []
+
+
+def test_retry_queue_content_columns_added_to_existing_database():
+    """Opening a database whose retry_queue predates the content columns should add them, keeping rows."""
+    import sqlite3
+
+    from src.database import Database
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "old.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "CREATE TABLE retry_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, entry_guid TEXT UNIQUE NOT NULL, "
+            "feed_id INTEGER NOT NULL, entry_url TEXT NOT NULL, entry_title TEXT, category TEXT NOT NULL, "
+            "first_failed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_attempt_at TIMESTAMP, "
+            "next_retry_at TIMESTAMP, retry_count INTEGER DEFAULT 0, last_error TEXT)"
+        )
+        conn.execute("INSERT INTO retry_queue (entry_guid, feed_id, entry_url, category) VALUES ('old', 1, 'u', 'articles')")
+        conn.commit()
+        conn.close()
+
+        db = Database(db_path)
+
+        columns = {r["name"] for r in db.execute("PRAGMA table_info(retry_queue)").fetchall()}
+        assert {"entry_content", "published_at"} <= columns
+        row = db.execute("SELECT * FROM retry_queue WHERE entry_guid = 'old'").fetchone()
+        assert row["entry_url"] == "u"
+        assert row["entry_content"] is None
+
+
+def _stored(db, guid="g1"):
+    return db.execute("SELECT entry_content, published_at FROM retry_queue WHERE entry_guid = ?", (guid,)).fetchone()
+
+
+def test_retry_queue_stores_feed_content_and_published_date():
+    from datetime import datetime
+
+    from src.database import Database
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = Database(Path(tmpdir) / "test.db")
+        db.add_to_retry_queue("g1", 1, "https://x", "t", "articles", "e",
+                              entry_content="<p>full text</p>", published_at=datetime(2026, 10, 2, 8, 0))
+
+        row = _stored(db)
+        assert row["entry_content"] == "<p>full text</p>"
+        assert datetime.fromisoformat(row["published_at"]) == datetime(2026, 10, 2, 8, 0)
+
+
+def test_requeue_with_new_content_replaces_it():
+    from src.database import Database
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = Database(Path(tmpdir) / "test.db")
+        db.add_to_retry_queue("g1", 1, "https://x", "t", "articles", "e", entry_content="<p>old</p>")
+        db.add_to_retry_queue("g1", 1, "https://x", "t", "articles", "e", entry_content="<p>new</p>")
+
+        assert _stored(db)["entry_content"] == "<p>new</p>"
+
+
+def test_requeue_without_content_keeps_stored_content_and_date():
+    from datetime import datetime
+
+    from src.database import Database
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = Database(Path(tmpdir) / "test.db")
+        db.add_to_retry_queue("g1", 1, "https://x", "t", "articles", "e",
+                              entry_content="<p>full text</p>", published_at=datetime(2026, 10, 2, 8, 0))
+        db.add_to_retry_queue("g1", 1, "https://x", "t", "articles", "e", entry_content="", published_at=None)
+
+        row = _stored(db)
+        assert row["entry_content"] == "<p>full text</p>"
+        assert row["published_at"] is not None

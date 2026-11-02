@@ -179,13 +179,33 @@ def test_same_title_different_source_gets_numbered_suffix(vault):
     assert first.exists()
 
 
-def test_same_source_replaces_existing_note(vault):
+def test_existing_note_is_never_overwritten(vault):
     first = write_note(vault, CONFIG, _article(), _analysis(summary="old"), TODAY)
     second = write_note(vault, CONFIG, _article(), _analysis(summary="new"), TODAY)
 
-    assert second == first
-    assert "new" in first.read_text()
-    assert len(list(first.parent.glob("*.md"))) == 1
+    assert second.name == "Agent-Evals-A-Guide-2.md"
+    assert "old" in first.read_text()
+
+
+def test_same_title_in_another_folder_gets_numbered_suffix(vault):
+    _note(vault / "2 Know-how" / "AI & ML" / "Weekly-Roundup.md", "https://a.example/roundup")
+
+    path = write_note(vault, CONFIG, _article(title="Weekly Roundup", url="https://b.example/roundup"),
+                      _analysis(kb_folder="Leadership"), TODAY)
+
+    assert path == vault / "2 Know-how" / "Leadership" / "Weekly-Roundup-2.md"
+
+
+def test_written_note_is_added_to_the_index(vault):
+    from src.vault_writer import VaultIndex
+
+    index = VaultIndex.build(vault)
+    path = write_note(vault, CONFIG, _article(), _analysis(), TODAY, index=index)
+    second = write_note(vault, CONFIG, _article(url="https://other.example/x"), _analysis(kb_folder="Leadership"),
+                        TODAY, index=index)
+
+    assert index.find_source(URL) == path
+    assert second.stem == "Agent-Evals-A-Guide-2"
 
 
 def test_no_temporary_files_left_behind(vault):
@@ -461,3 +481,117 @@ def test_folder_equal_to_knowledge_base_name_goes_to_fallback(vault):
     path = write_note(vault, CONFIG, _article(), _analysis(kb_folder="2 Know-how"), TODAY)
 
     assert path.parent == vault / "2 Know-how" / "Misc"
+
+
+# --- vault index: same source and unique filenames ------------------------
+
+
+def _note(path, source=None, body="text"):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    front = f"---\nsource: {source}\n---\n" if source is not None else ""
+    path.write_text(front + body)
+    return path
+
+
+def test_index_maps_sources_and_skips_hidden_folders(vault):
+    from src.vault_writer import VaultIndex
+
+    clipped = _note(vault / "2 Know-how" / "AI & ML" / "Clipped.md", "https://example.com/a")
+    _note(vault / ".trash" / "Old.md", "https://example.com/trashed")
+    _note(vault / "2 Know-how" / ".hidden" / "Secret.md", "https://example.com/hidden")
+
+    index = VaultIndex.build(vault)
+
+    assert index.find_source("https://example.com/a") == clipped
+    assert index.find_source("https://example.com/trashed") is None
+    assert index.find_source("https://example.com/hidden") is None
+    assert not index.has_stem("Old")
+
+
+def test_index_handles_notes_without_frontmatter_or_string_source(vault):
+    from src.vault_writer import VaultIndex
+
+    _note(vault / "Plain.md", body="no frontmatter here")
+    (vault / "Listed.md").write_text("---\nsource:\n  - https://example.com/list\n---\nbody")
+    (vault / "Broken.md").write_text("---\nsource: [unclosed\n---\nbody")
+    (vault / "Latin.md").write_bytes("---\nsource: https://example.com/l\n---\nGr\xfc\xdfe".encode("latin-1"))
+
+    index = VaultIndex.build(vault)
+
+    assert index.has_stem("Plain") and index.has_stem("Listed") and index.has_stem("Broken")
+    assert index.find_source("https://example.com/list") is None
+    assert index.find_source("https://example.com/l") == vault / "Latin.md"
+
+
+def test_index_stems_ignore_case(vault):
+    from src.vault_writer import VaultIndex
+
+    _note(vault / "2 Know-how" / "AI & ML" / "Weekly-Roundup.md")
+
+    index = VaultIndex.build(vault)
+
+    assert index.has_stem("weekly-roundup")
+    assert index.has_stem("WEEKLY-ROUNDUP")
+    assert not index.has_stem("Weekly-Roundup-2")
+
+
+# --- Templater dates in a new daily note ----------------------------------
+
+
+@pytest.mark.parametrize("template, expected", [
+    ('<% tp.date.now("YYYY-MM-DD", -1) %>', "2026-11-01"),
+    ('<% tp.date.now("YYYY-MM-DD", 1) %>', "2026-11-03"),
+    ("<% tp.date.now('YYYY-MM-DD',-7) %>", "2026-10-26"),
+    ('<% tp.date.now("dddd, MMMM Do YYYY") %>', "Monday, November 2nd 2026"),
+    ('<% tp.date.now("D.M.YYYY") %>', "2.11.2026"),
+    ('<% tp.date.now("ddd DD MMM YY") %>', "Mon 02 Nov 26"),
+    ("<% tp.date.now() %>", "2026-11-02"),
+])
+def test_templater_date_expressions(template, expected):
+    from src.vault_writer import _resolve_templater_dates
+
+    assert _resolve_templater_dates(template, date(2026, 11, 2)) == expected
+
+
+@pytest.mark.parametrize("day, ordinal", [(1, "1st"), (2, "2nd"), (3, "3rd"), (4, "4th"), (11, "11th"),
+                                          (12, "12th"), (13, "13th"), (21, "21st"), (22, "22nd"), (31, "31st")])
+def test_templater_ordinal_days(day, ordinal):
+    from src.vault_writer import _resolve_templater_dates
+
+    assert _resolve_templater_dates('<% tp.date.now("Do") %>', date(2026, 10, day)) == ordinal
+
+
+def test_other_templater_commands_are_left_alone():
+    from src.vault_writer import _resolve_templater_dates
+
+    text = '<% tp.file.title %> <% tp.date.now("YYYY", "P-1D") %>'
+
+    assert _resolve_templater_dates(text, date(2026, 11, 2)) == text
+
+
+def test_feed_text_note_does_not_claim_the_page_failed():
+    text = render_note(_article(from_feed=True), _analysis(), TODAY)
+
+    assert "Text taken from the feed (the page had less text or could not be read)." in text
+
+
+@pytest.mark.parametrize("frontmatter", ["created: 2024-02-30", "created: 0000-01-01", "a: " + "[" * 2000],
+                         ids=["invalid-day", "year-zero", "deep-nesting"])
+def test_index_survives_frontmatter_that_yaml_cannot_load(vault, frontmatter):
+    from src.vault_writer import VaultIndex
+
+    (vault / "Odd.md").write_text(f"---\n{frontmatter}\nsource: https://example.com/odd\n---\nbody")
+    _note(vault / "Good.md", "https://example.com/good")
+
+    index = VaultIndex.build(vault)
+
+    assert index.has_stem("Odd")
+    assert index.find_source("https://example.com/good") == vault / "Good.md"
+
+
+def test_templater_bracketed_text_is_kept_literally():
+    from src.vault_writer import _resolve_templater_dates
+
+    result = _resolve_templater_dates('<% tp.date.now("[Daily] YYYY-MM-DD [Week of] D MMM") %>', date(2026, 11, 2))
+
+    assert result == "Daily 2026-11-02 Week of 2 Nov"

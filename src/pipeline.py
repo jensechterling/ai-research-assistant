@@ -19,6 +19,7 @@ from src.feed_manager import FeedManager
 from src.llm import FatalRunError, MeliousClient, resolve_api_key
 from src.models import Entry
 from src.processor import EntryProcessor
+from src.vault_writer import VaultIndex
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,8 @@ def build_processor(config: dict, today: date) -> EntryProcessor:
         headers={"User-Agent": config["feeds"]["user_agent"]},
         follow_redirects=True,
     )
-    return EntryProcessor(config, vault, context, MeliousClient(config["llm"], key), http_client, today)
+    return EntryProcessor(config, vault, context, MeliousClient(config["llm"], key), http_client, today,
+                          index=VaultIndex.build(vault))
 
 
 def run_pipeline(
@@ -241,9 +243,12 @@ def _select_entries(db: Database, feed_manager, config: dict, now: datetime, lim
         if row["category"] != SUPPORTED_CATEGORY:
             unsupported[(f"feed {row['feed_id']}", row["category"])] += 1
             continue
+        published = row["published_at"]
         entries.append(Entry(
-            guid=row["entry_guid"], title=row["entry_title"] or "Untitled", url=row["entry_url"], content="",
-            author=None, published_at=None, feed_id=row["feed_id"], feed_title="", category=row["category"],
+            guid=row["entry_guid"], title=row["entry_title"] or "Untitled", url=row["entry_url"],
+            content=row["entry_content"] or "", author=None,
+            published_at=datetime.fromisoformat(published) if published else None,
+            feed_id=row["feed_id"], feed_title="", category=row["category"],
         ))
 
     for (feed, category), count in unsupported.items():
@@ -297,7 +302,8 @@ def _process_entries(db: Database, processor, entries: list[Entry], retry_guids:
 
         try:
             outcome = processor.process(entry)
-        except FatalRunError:
+        except FatalRunError as e:
+            result.cost_eur += e.cost_eur
             raise
         except Exception as e:
             outcome = None
@@ -305,6 +311,14 @@ def _process_entries(db: Database, processor, entries: list[Entry], retry_guids:
         else:
             error = outcome.error or "Unknown error"
             result.cost_eur += outcome.cost_eur
+
+        if outcome is not None and outcome.existing:
+            # Already in the vault: stored as processed, but not counted, and no analysis ran.
+            db.mark_processed(entry.guid, entry.feed_id, entry.url, entry.title, outcome.note_path)
+            if is_retry:
+                db.remove_from_retry_queue(entry.guid)
+            logger.info(f"[EXISTS] {entry.title} → {outcome.note_path}")
+            continue
 
         if outcome is not None and (outcome.success or outcome.step == "vault"):
             analysis_worked = True
@@ -328,6 +342,7 @@ def _process_entries(db: Database, processor, entries: list[Entry], retry_guids:
             still_queued = db.add_to_retry_queue(
                 entry_guid=entry.guid, feed_id=entry.feed_id, entry_url=entry.url,
                 entry_title=entry.title, category=entry.category, error=error,
+                entry_content=entry.content, published_at=entry.published_at,
             )
             if not still_queued:
                 db.mark_processed(entry.guid, entry.feed_id, entry.url, entry.title, None)
