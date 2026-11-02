@@ -567,3 +567,9 @@ def test_other_templater_commands_are_left_alone():
     text = '<% tp.file.title %> <% tp.date.now("YYYY", "P-1D") %>'
 
     assert _resolve_templater_dates(text, date(2026, 11, 2)) == text
+
+
+def test_feed_text_note_does_not_claim_the_page_failed():
+    text = render_note(_article(from_feed=True), _analysis(), TODAY)
+
+    assert "Text taken from the feed (the page had less text or could not be read)." in text
