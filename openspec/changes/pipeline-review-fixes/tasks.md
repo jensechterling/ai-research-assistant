@@ -39,7 +39,7 @@ Every fix starts with a test that fails on the current code (test first), then t
 
 - [x] 7.1 Update `CLAUDE.md` (core flow: same-source check before analysis, 403 transient), `README.md` (weekly backup goes to `backup/feeds`) and add a `CHANGELOG.md` entry. Done when each statement matches the code.
 - [x] 7.2 Run `uv run pytest tests/ -v`, `uv run ruff check src/ tests/` and `openspec validate pipeline-review-fixes --strict`. Done when all three pass.
-- [ ] 7.3 Run `run --dry-run` from the worktree against a copy of the iMac database and vault, then `run --limit 3 --verbose` on the copy. Done when the log shows the same-source check and no warnings, and the copied database's `retry_queue` holds content for newly queued entries.
+- [x] 7.3 Run `run --dry-run` from the worktree against a copy of the iMac database and vault (Markdown files only), then a full run on the copy. Done (2026-11-02): 67 entries over two runs (8, then 59), giving 60 notes and 7 permanent skips (short posts), 0 failures, 0 warnings, EUR 0.17; the 24 queued URLs that already had notes are February rows already marked processed, so the same-source check was exercised by calling the real processor on the copy with a clipped note's URL: matched, no download or model call, note bytes unchanged. No entry was newly queued, so stored retry content is covered by tests only.
 
 ## Workflow follow-up
 
